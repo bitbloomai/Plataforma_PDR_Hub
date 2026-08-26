@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { Eye, EyeOff, LogIn } from "lucide-react";
 import { useState } from "react";
 
@@ -10,16 +10,16 @@ import { toast } from "@/lib/toast";
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ email: "", password: "" });
 
-  const next = searchParams.get("next") || "/panel";
-
   async function handleSubmit(event) {
     event.preventDefault();
     setLoading(true);
+
+    const params = new URLSearchParams(window.location.search);
+    const next = params.get("next") || "/panel";
 
     const response = await fetch("/api/auth/login", {
       method: "POST",
@@ -128,4 +128,3 @@ export default function LoginPage() {
     </AuthCard>
   );
 }
-

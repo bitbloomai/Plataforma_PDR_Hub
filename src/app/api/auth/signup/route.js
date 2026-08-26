@@ -34,6 +34,7 @@ export async function POST(request) {
       user_metadata: {
         nome: userName,
         conta_nome: accountName,
+        papel: "admin",
       },
     });
 
@@ -104,4 +105,3 @@ export async function POST(request) {
 
   return NextResponse.json({ redirectTo: DEFAULT_REDIRECT });
 }
-
