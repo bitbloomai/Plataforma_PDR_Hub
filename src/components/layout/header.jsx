@@ -156,7 +156,7 @@ export function Header() {
     me?.conta?.nome_fantasia || me?.conta?.nome || me?.configuracao?.nome_sistema || "Conta";
 
   return (
-    <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl">
+    <header className="sticky top-0 z-40 shrink-0 bg-background/80 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="relative flex h-20 items-center gap-4 px-4 sm:px-5 lg:px-7">
         <div className="pointer-events-none absolute inset-x-8 bottom-[-1px] h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
 

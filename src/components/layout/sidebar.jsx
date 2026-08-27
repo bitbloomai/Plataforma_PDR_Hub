@@ -50,18 +50,16 @@ function isActivePath(pathname, href) {
 }
 
 function BrandImage({ collapsed }) {
-  const [src, setSrc] = useState(collapsed ? LOGO_SHORT : LOGO_FULL);
-
-  useEffect(() => {
-    setSrc(collapsed ? LOGO_SHORT : LOGO_FULL);
-  }, [collapsed]);
+  const requestedSrc = collapsed ? LOGO_SHORT : LOGO_FULL;
+  const [brokenSrc, setBrokenSrc] = useState(null);
+  const src = brokenSrc === requestedSrc ? "/logo.png" : requestedSrc;
 
   return (
     <img
       src={src}
       alt="Logo"
       className={collapsed ? "h-12 w-12 object-contain" : "h-12 max-w-50 object-contain"}
-      onError={() => setSrc(collapsed ? "/logo.png" : "/logo.png")}
+      onError={() => setBrokenSrc(requestedSrc)}
     />
   );
 }
@@ -71,13 +69,14 @@ export function Sidebar({ collapsed, onToggle }) {
   const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
-    setMoreOpen(false);
+    const frame = window.requestAnimationFrame(() => setMoreOpen(false));
+    return () => window.cancelAnimationFrame(frame);
   }, [pathname]);
 
   return (
     <>
       <aside
-        className={`relative hidden h-dvh shrink-0 border-r border-border bg-surface transition-[width] duration-300 md:flex md:flex-col ${
+        className={`relative hidden h-[var(--panel-viewport-height,100svh)] shrink-0 border-r border-border bg-surface transition-[width] duration-300 md:flex md:flex-col ${
           collapsed ? "w-[76px]" : "w-[252px]"
         }`}
       >

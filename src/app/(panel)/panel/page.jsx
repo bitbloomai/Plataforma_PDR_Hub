@@ -14,6 +14,7 @@ import {
   Filter,
   Gauge,
   Plus,
+  Printer,
   ReceiptText,
   RefreshCw,
   TrendingUp,
@@ -24,7 +25,9 @@ import {
 
 import { createClient } from "@/lib/supabase/client";
 import { localISO, todayISO } from "@/lib/dates";
+import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
 import { formatDateByConfig } from "@/lib/formatters";
+import { toast } from "@/lib/toast";
 
 const PAGE_SIZE = 1000;
 const MAX_ROWS = 20000;
@@ -167,13 +170,7 @@ function buildTimeSeries(services, movements, from, to, config) {
     .map((item) => ({ ...item, label: bucketLabel(item.key, mode, config) }));
 }
 
-function csvEscape(value) {
-  const text = String(value ?? "");
-  if (/[;"\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
-}
-
-function downloadCsv(services, formatMoney) {
+function serviceExportRows(services, formatMoney, config) {
   const header = ["Data", "Oficina", "Placa", "Veículo", "Técnicos", "Valor"];
   const rows = services.map((service) => {
     const techs = (service.servicos_tecnicos || [])
@@ -184,7 +181,7 @@ function downloadCsv(services, formatMoney) {
     const vehicle = [service.veiculo?.marca, service.veiculo?.modelo].filter(Boolean).join(" ");
 
     return [
-      service.data_servico,
+      formatDateByConfig(service.data_servico, config) || service.data_servico,
       service.oficina?.nome || "",
       service.veiculo?.placa || "",
       vehicle,
@@ -193,19 +190,41 @@ function downloadCsv(services, formatMoney) {
     ];
   });
 
-  const content = [header, ...rows]
-    .map((row) => row.map(csvEscape).join(";"))
-    .join("\n");
+  return { headers: header, rows };
+}
 
-  const blob = new Blob(["\uFEFF", content], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `relatorio-servicos-${todayISO()}.csv`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+function downloadCsv({ services, metrics, from, to, formatMoney, config }) {
+  const serviceExport = serviceExportRows(services, formatMoney, config);
+  const period = `${formatDateByConfig(from, config) || from} ate ${formatDateByConfig(to, config) || to}`;
+
+  downloadCsvReport({
+    filename: `dashboard_${from}_${to}.csv`,
+    title: "PDR Hub - Dashboard",
+    metadata: [
+      ["Periodo", period],
+      ["Gerado em", todayISO()],
+      ["Total de servicos", services.length],
+    ],
+    sections: [
+      {
+        title: "Resumo executivo",
+        headers: ["Indicador", "Valor"],
+        rows: [
+          ["Faturamento", formatMoney(metrics.faturamento)],
+          ["Recebido", formatMoney(metrics.recebido)],
+          ["A receber", formatMoney(metrics.aReceber)],
+          ["Despesas", formatMoney(metrics.despesas)],
+          ["Resultado", formatMoney(metrics.resultado)],
+          ["Ticket medio", formatMoney(metrics.ticketMedio)],
+        ],
+      },
+      {
+        title: "Servicos filtrados",
+        headers: serviceExport.headers,
+        rows: serviceExport.rows,
+      },
+    ],
+  });
 }
 
 async function fetchMe() {
@@ -950,6 +969,60 @@ export default function DashboardPage() {
   const latestServices = services.slice(0, 8);
   const refreshing = loading || isPending;
   const greetingName = me?.usuario?.nome?.split(" ")?.[0] || "";
+  const reportPeriod = `${formatDateByConfig(from, me?.configuracao) || from} ate ${
+    formatDateByConfig(to, me?.configuracao) || to
+  }`;
+
+  function printDashboard() {
+    const serviceExport = serviceExportRows(services, formatMoney, me?.configuracao);
+    const opened = openPrintReport({
+      title: "Dashboard financeiro e operacional",
+      subtitle: me?.conta?.nome_fantasia || me?.conta?.nome || "PDR Hub",
+      locale: me?.configuracao?.locale || "pt-BR",
+      metadata: [
+        ["Periodo", reportPeriod],
+        ["Regime", "Visao consolidada"],
+        ["Moeda", me?.configuracao?.moeda || "EUR"],
+        ["Servicos", services.length],
+      ],
+      summaryCards: [
+        { label: "Faturamento", value: formatMoney(metrics.faturamento) },
+        { label: "Recebido", value: formatMoney(metrics.recebido), tone: "success" },
+        { label: "A receber", value: formatMoney(metrics.aReceber), tone: "warning" },
+        {
+          label: "Resultado",
+          value: formatMoney(metrics.resultado),
+          tone: metrics.resultado >= 0 ? "success" : "danger",
+        },
+      ],
+      sections: [
+        {
+          title: "Resumo executivo",
+          headers: ["Indicador", "Valor"],
+          rows: [
+            ["Despesas", formatMoney(metrics.despesas)],
+            ["Repasses pagos", formatMoney(metrics.repassesPagos)],
+            ["Repasses pendentes", formatMoney(metrics.repassesPendentes)],
+            ["Ticket medio", formatMoney(metrics.ticketMedio)],
+            ["Oficinas atendidas", metrics.oficinasAtendidas],
+            ["Tecnicos ativos", metrics.tecnicosAtivos],
+          ],
+          numericColumns: [1],
+        },
+        {
+          title: "Servicos filtrados",
+          description: "Tabela exportada com os mesmos filtros aplicados na tela.",
+          headers: serviceExport.headers,
+          rows: serviceExport.rows.slice(0, 120),
+          numericColumns: [5],
+        },
+      ],
+    });
+
+    if (!opened) {
+      toast.warning("Pop-up bloqueado", "Permita pop-ups para imprimir ou salvar em PDF.");
+    }
+  }
 
   if (loading && !me && rawServices.length === 0) return <SkeletonDashboard />;
 
@@ -968,12 +1041,31 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => downloadCsv(services, formatMoney)}
+            onClick={() =>
+              downloadCsv({
+                services,
+                metrics,
+                from,
+                to,
+                formatMoney,
+                config: me?.configuracao,
+              })
+            }
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-medium text-foreground transition hover:bg-surface-2 disabled:opacity-50"
             disabled={!services.length}
           >
             <Download className="size-4" strokeWidth={1.8} />
             Exportar CSV
+          </button>
+
+          <button
+            type="button"
+            onClick={printDashboard}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-medium text-foreground transition hover:bg-surface-2 disabled:opacity-50"
+            disabled={!services.length}
+          >
+            <Printer className="size-4" strokeWidth={1.8} />
+            PDF
           </button>
 
           <Link

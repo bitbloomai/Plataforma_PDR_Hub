@@ -123,12 +123,18 @@ export const Input = forwardRef(function Input({ className, error, ...props }, r
 
 export const DateInput = forwardRef(function DateInput({ className, error, ...props }, ref) {
   return (
-    <div className="relative">
+    <div className="relative min-w-0 max-w-full overflow-hidden">
       <CalendarDays
         className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
         strokeWidth={1.8}
       />
-      <Input ref={ref} type="date" error={error} className={cn("pl-9", className)} {...props} />
+      <Input
+        ref={ref}
+        type="date"
+        error={error}
+        className={cn("min-w-0 max-w-full appearance-none pl-9 pr-2", className)}
+        {...props}
+      />
     </div>
   );
 });
@@ -267,7 +273,6 @@ export function SearchableSelect({
 
   useEffect(() => {
     if (!open) return;
-    setHighlighted(0);
     window.setTimeout(() => searchRef.current?.focus(), 0);
   }, [open]);
 
@@ -281,6 +286,7 @@ export function SearchableSelect({
   function onKeyDown(event) {
     if (!open && ["Enter", " ", "ArrowDown"].includes(event.key)) {
       event.preventDefault();
+      setHighlighted(0);
       setOpen(true);
       return;
     }
@@ -316,7 +322,10 @@ export function SearchableSelect({
           !selected && "text-muted-foreground",
           error && "border-danger focus:border-danger focus:ring-danger/15"
         )}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          setHighlighted(0);
+          setOpen((current) => !current);
+        }}
       >
         <span className="min-w-0 flex-1 truncate">{selected?.label || placeholder}</span>
         <ChevronDown className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />

@@ -14,6 +14,7 @@ import {
   Layers3,
   Pencil,
   Plus,
+  Printer,
   ReceiptText,
   RefreshCw,
   RotateCcw,
@@ -44,6 +45,7 @@ import {
 } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
 import { localISO, todayISO } from "@/lib/dates";
+import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
 import { formatDateByConfig } from "@/lib/formatters";
 import { toast } from "@/lib/toast";
 
@@ -222,12 +224,6 @@ function serviceLabel(movement) {
   if (vehicleName) return vehicleName;
   if (plate) return plate;
   return null;
-}
-
-function csvEscape(value) {
-  const text = String(value ?? "");
-  if (/[;"\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
 }
 
 async function fetchMe() {
@@ -1416,6 +1412,22 @@ export default function FinanceiroPage() {
     }
   }
 
+  function movementExportRows(rows) {
+    return rows.map((movement) => [
+      formatDate(movement.data_competencia),
+      movement.descricao || "",
+      categoryMeta(movement).name,
+      movement.oficina?.nome || "",
+      movement.tecnico?.nome || "",
+      movement.tipo === "receita" ? "Receita" : "Despesa",
+      formatMoney(movement.valor),
+      isPaid(movement.status) ? (isRevenue(movement) ? "Recebido" : "Pago") : "Pendente",
+      movement.data_vencimento ? formatDate(movement.data_vencimento) : "",
+      movement.data_pagamento ? formatDate(movement.data_pagamento) : "",
+      movement.forma_pagamento || "",
+    ]);
+  }
+
   function exportCsv() {
     if (!filteredMovements.length) {
       toast.info("Nada para exportar", "Os filtros atuais não possuem movimentações.");
@@ -1436,38 +1448,94 @@ export default function FinanceiroPage() {
       "Forma de pagamento",
     ];
 
-    const rows = filteredMovements.map((movement) => [
-      movement.data_competencia || "",
-      movement.descricao || "",
-      categoryMeta(movement).name,
-      movement.oficina?.nome || "",
-      movement.tecnico?.nome || "",
-      movement.tipo === "receita" ? "Receita" : "Despesa",
-      safeNumber(movement.valor).toFixed(2).replace(".", ","),
-      isPaid(movement.status)
-        ? isRevenue(movement)
-          ? "Recebido"
-          : "Pago"
-        : "Pendente",
-      movement.data_vencimento || "",
-      movement.data_pagamento || "",
-      movement.forma_pagamento || "",
-    ]);
-
-    const content = [header, ...rows]
-      .map((row) => row.map(csvEscape).join(";"))
-      .join("\n");
-    const blob = new Blob(["\uFEFF", content], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `financeiro_${from}_${to}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    downloadCsvReport({
+      filename: `financeiro_${from}_${to}.csv`,
+      title: "PDR Hub - Financeiro",
+      metadata: [
+        ["Periodo", `${formatDate(from)} ate ${formatDate(to)}`],
+        ["Moeda", currency],
+        ["Lancamentos", filteredMovements.length],
+        ["Gerado em", todayISO()],
+      ],
+      sections: [
+        {
+          title: "Resumo financeiro",
+          headers: ["Indicador", "Valor"],
+          rows: [
+            ["Receitas", formatMoney(metrics.totalRevenue)],
+            ["Despesas", formatMoney(metrics.totalExpense)],
+            ["Saldo do periodo", formatMoney(metrics.periodBalance)],
+            ["Entradas realizadas", formatMoney(metrics.received)],
+            ["Saidas realizadas", formatMoney(metrics.paid)],
+            ["Saldo realizado", formatMoney(metrics.realizedBalance)],
+          ],
+        },
+        {
+          title: "Movimentacoes filtradas",
+          headers: header,
+          rows: movementExportRows(filteredMovements),
+        },
+      ],
+    });
 
     toast.success("CSV gerado", "As movimentações filtradas foram exportadas.");
+  }
+
+  function printFinancialReport() {
+    if (!filteredMovements.length) {
+      toast.info("Nada para exportar", "Os filtros atuais nÃ£o possuem movimentaÃ§Ãµes.");
+      return;
+    }
+
+    const opened = openPrintReport({
+      title: "Relatorio financeiro",
+      subtitle: me?.conta?.nome_fantasia || me?.conta?.nome || "PDR Hub",
+      locale,
+      metadata: [
+        ["Periodo", `${formatDate(from)} ate ${formatDate(to)}`],
+        ["Moeda", currency],
+        ["Lancamentos", filteredMovements.length],
+        ["Aba", activeTab === "revenue" ? "Receitas" : activeTab === "expense" ? "Despesas" : "Fluxo de caixa"],
+      ],
+      summaryCards: [
+        { label: "Receitas", value: formatMoney(metrics.totalRevenue), tone: "success" },
+        { label: "Despesas", value: formatMoney(metrics.totalExpense), tone: "danger" },
+        {
+          label: "Saldo periodo",
+          value: formatMoney(metrics.periodBalance),
+          tone: metrics.periodBalance >= 0 ? "success" : "danger",
+        },
+        {
+          label: "Saldo realizado",
+          value: formatMoney(metrics.realizedBalance),
+          tone: metrics.realizedBalance >= 0 ? "success" : "danger",
+        },
+      ],
+      sections: [
+        {
+          title: "Movimentacoes filtradas",
+          description: "Exportacao com os mesmos filtros aplicados na tela.",
+          headers: [
+            "Data",
+            "Descricao",
+            "Categoria",
+            "Oficina",
+            "Tecnico",
+            "Tipo",
+            "Valor",
+            "Status",
+            "Vencimento",
+            "Pagamento",
+          ],
+          rows: movementExportRows(filteredMovements).map((row) => row.slice(0, 10)),
+          numericColumns: [6],
+        },
+      ],
+    });
+
+    if (!opened) {
+      toast.warning("Pop-up bloqueado", "Permita pop-ups para imprimir ou salvar em PDF.");
+    }
   }
 
   const movementColumns = [
@@ -1722,6 +1790,14 @@ export default function FinanceiroPage() {
             disabled={!filteredMovements.length || activeTab === "categories"}
           >
             Exportar CSV
+          </Button>
+          <Button
+            variant="outline"
+            leftIcon={Printer}
+            onClick={printFinancialReport}
+            disabled={!filteredMovements.length || activeTab === "categories"}
+          >
+            Imprimir / PDF
           </Button>
           <Button
             variant="outline"

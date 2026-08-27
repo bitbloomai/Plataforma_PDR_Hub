@@ -41,6 +41,7 @@ import {
   Table,
 } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
+import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
 import { formatDateByConfig } from "@/lib/formatters";
 import { toast } from "@/lib/toast";
 
@@ -204,21 +205,6 @@ function safeNumber(value) {
 function safeHex(value, fallback = "#F2C21B") {
   const color = String(value || "").trim();
   return /^#[0-9a-f]{6}$/i.test(color) ? color.toUpperCase() : fallback;
-}
-
-function csvEscape(value) {
-  const text = String(value ?? "");
-  if (/[;"\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
-}
-
-function htmlEscape(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }
 
 function isRevenue(row) {
@@ -1373,40 +1359,32 @@ export default function DrePage() {
       [],
     ];
 
-    const content = [
-      ...metadata,
-      ...summaryRows,
-      [],
-      detailHeader,
-      ...detailRows,
-    ]
-      .map((row) => row.map(csvEscape).join(";"))
-      .join("\n");
-
-    const blob = new Blob(["\uFEFF", content], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `dre_${from}_${to}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    downloadCsvReport({
+      filename: `dre_${from}_${to}.csv`,
+      title: "PDR Hub - DRE",
+      metadata: metadata.filter((row) => row.length),
+      sections: [
+        {
+          title: "Resumo DRE",
+          headers: summaryRows[0],
+          rows: summaryRows.slice(1).map(([label, current, previous]) => [
+            label,
+            typeof current === "number" ? formatMoney(current) : current,
+            typeof previous === "number" ? formatMoney(previous) : previous,
+          ]),
+        },
+        {
+          title: "Detalhamento por categoria",
+          headers: detailHeader,
+          rows: detailRows,
+        },
+      ],
+    });
 
     toast.success("DRE exportado", "O arquivo CSV foi gerado com o resumo e o detalhamento.");
   }
 
   function printDre() {
-    const popup = window.open("", "_blank", "width=980,height=760");
-
-    if (!popup) {
-      toast.warning(
-        "Pop-up bloqueado",
-        "Permita pop-ups para esta página e tente novamente para imprimir ou salvar em PDF."
-      );
-      return;
-    }
-
     const statementRows = [
       ["Receita operacional", snapshot.operatingRevenue],
       ["(-) Custos diretos", snapshot.directCosts],
@@ -1427,84 +1405,58 @@ export default function DrePage() {
     const detailRows = categoryComparisonRows
       .filter((row) => row.currentAmount > 0)
       .sort((a, b) => b.currentAmount - a.currentAmount)
-      .map(
-        (row) => `
-          <tr>
-            <td>${htmlEscape(row.categoryName)}</td>
-            <td>${htmlEscape(row.groupLabel)}</td>
-            <td>${htmlEscape(row.type === "receita" ? "Receita" : "Despesa")}</td>
-            <td class="number">${htmlEscape(formatMoney(row.currentAmount))}</td>
-          </tr>`
-      )
-      .join("");
+      .map((row) => [
+        row.categoryName,
+        row.groupLabel,
+        row.type === "receita" ? "Receita" : "Despesa",
+        formatMoney(row.currentAmount),
+      ]);
 
-    popup.document.write(`
-      <!doctype html>
-      <html lang="${htmlEscape(locale)}">
-        <head>
-          <meta charset="utf-8" />
-          <title>DRE ${htmlEscape(periodLabel)}</title>
-          <style>
-            * { box-sizing: border-box; }
-            body { margin: 32px; color: #171715; font-family: Arial, Helvetica, sans-serif; font-size: 13px; }
-            h1 { margin: 0 0 4px; font-size: 24px; }
-            p { margin: 0; color: #66665f; }
-            .meta { margin: 18px 0 24px; padding: 12px 14px; border: 1px solid #dfdfd9; border-radius: 10px; }
-            .statement { width: 100%; border-collapse: collapse; margin-top: 14px; }
-            .statement td { padding: 10px 8px; border-bottom: 1px solid #e9e9e5; }
-            .statement td:last-child { text-align: right; font-weight: 700; }
-            .result td { border-top: 2px solid #171715; font-size: 15px; font-weight: 700; }
-            h2 { margin: 28px 0 8px; font-size: 16px; }
-            .details { width: 100%; border-collapse: collapse; }
-            .details th, .details td { padding: 8px; border-bottom: 1px solid #e9e9e5; text-align: left; }
-            .details th { background: #f7f7f5; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-            .number { text-align: right !important; }
-            .footer { margin-top: 22px; color: #777; font-size: 11px; }
-            @media print { body { margin: 18mm; } }
-          </style>
-        </head>
-        <body>
-          <h1>Demonstração do Resultado do Exercício</h1>
-          <p>${htmlEscape(me?.conta?.nome_fantasia || me?.conta?.nome || "Empresa")}</p>
-          <div class="meta">
-            <strong>Período:</strong> ${htmlEscape(periodLabel)}<br />
-            <strong>Regime:</strong> Competência<br />
-            <strong>Moeda:</strong> ${htmlEscape(currency)}
-          </div>
+    const opened = openPrintReport({
+      title: "Demonstração do Resultado do Exercício",
+      subtitle: me?.conta?.nome_fantasia || me?.conta?.nome || "PDR Hub",
+      locale,
+      metadata: [
+        ["Período", periodLabel],
+        ["Regime", "Competência"],
+        ["Moeda", currency],
+        comparePrevious ? ["Comparação", previousPeriodLabel] : ["Comparação", "Desativada"],
+      ],
+      summaryCards: [
+        { label: "Receita total", value: formatMoney(snapshot.totalRevenue), tone: "success" },
+        { label: "Despesas totais", value: formatMoney(snapshot.totalExpenses), tone: "danger" },
+        {
+          label: "Resultado líquido",
+          value: formatMoney(snapshot.netResult),
+          tone: snapshot.netResult >= 0 ? "success" : "danger",
+        },
+        { label: "Margem líquida", value: formatPercent(snapshot.margin) },
+      ],
+      sections: [
+        {
+          title: "Demonstrativo",
+          headers: ["Linha", "Valor"],
+          rows: statementRows.map(([label, value], index) => ({
+            cells: [label, formatMoney(value)],
+            tone: index === statementRows.length - 1 ? "result" : "",
+          })),
+          numericColumns: [1],
+        },
+        {
+          title: "Detalhamento por categoria",
+          headers: ["Categoria", "Grupo DRE", "Tipo", "Valor"],
+          rows: detailRows,
+          numericColumns: [3],
+        },
+      ],
+    });
 
-          <table class="statement">
-            ${statementRows
-              .map(
-                ([label, value], index) => `
-                  <tr class="${index === statementRows.length - 1 ? "result" : ""}">
-                    <td>${htmlEscape(label)}</td>
-                    <td>${htmlEscape(formatMoney(value))}</td>
-                  </tr>`
-              )
-              .join("")}
-          </table>
-
-          <p style="margin-top:10px"><strong>Margem líquida:</strong> ${htmlEscape(formatPercent(snapshot.margin))}</p>
-
-          <h2>Detalhamento por categoria</h2>
-          <table class="details">
-            <thead>
-              <tr>
-                <th>Categoria</th>
-                <th>Grupo DRE</th>
-                <th>Tipo</th>
-                <th class="number">Valor</th>
-              </tr>
-            </thead>
-            <tbody>${detailRows}</tbody>
-          </table>
-
-          <div class="footer">Gerado em ${htmlEscape(new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short", timeZone: me?.configuracao?.timezone || "Europe/Rome" }).format(new Date()))}.</div>
-          <script>window.onload = () => { window.print(); };</script>
-        </body>
-      </html>
-    `);
-    popup.document.close();
+    if (!opened) {
+      toast.warning(
+        "Pop-up bloqueado",
+        "Permita pop-ups para esta página e tente novamente para imprimir ou salvar em PDF."
+      );
+    }
   }
 
   const detailColumns = [
