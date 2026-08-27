@@ -10,7 +10,9 @@ export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
 
   useEffect(() => {
-    setMounted(true);
+    const frameId = requestAnimationFrame(() => setMounted(true));
+
+    return () => cancelAnimationFrame(frameId);
   }, []);
 
   if (!mounted) {

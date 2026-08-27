@@ -79,6 +79,10 @@ export async function POST(request) {
       .insert({
         conta_id: conta.id,
         nome_sistema: accountName,
+        moeda: "EUR",
+        locale: "it-IT",
+        timezone: "Europe/Rome",
+        formato_data: "DD/MM/YYYY",
       });
 
     if (configuracoesError) {

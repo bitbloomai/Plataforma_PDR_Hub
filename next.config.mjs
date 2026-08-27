@@ -53,8 +53,8 @@ const nextConfig = {
   },
 
   // 2. Recursos Experimentais & Compilador
+  reactCompiler: true, // Habilita o React Compiler
   experimental: {
-    reactCompiler: true, // Habilita o React Compiler
     serverActions: {
       bodySizeLimit: '10mb', // Útil para upload direto de imagens/arquivos
     },

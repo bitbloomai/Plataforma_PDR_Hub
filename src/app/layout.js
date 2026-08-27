@@ -11,11 +11,23 @@ const inter = Inter({
 });
 
 export const metadata = {
+  applicationName: "PDR Hub",
   title: {
-    default: "Plataforma",
-    template: "%s | Plataforma",
+    default: "PDR | Hub",
+    template: "%s | PDR Hub",
   },
-  description: "Plataforma de gestão.",
+  description:
+    "Plataforma interna para gestao de servicos automotivos, oficinas, tecnicos, veiculos e financeiro.",
+  appleWebApp: {
+    capable: true,
+    title: "PDR Hub",
+    statusBarStyle: "default",
+  },
+  icons: {
+    icon: "/Logo_Curta.png",
+    apple: "/Logo_Curta.png",
+    shortcut: "/Logo_Curta.png",
+  },
 };
 
 export default function RootLayout({ children }) {
