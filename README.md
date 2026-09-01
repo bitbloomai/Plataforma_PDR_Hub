@@ -48,6 +48,7 @@ flowchart LR
 | Settings | `/panel/configuracoes` | Account information and operational preferences. |
 | My Profile | `/panel/perfil` | Name, email, and profile photo of the logged-in user. |
 | Search | `/panel/busca?q=termo` | Global search by license plate, repair shop, technician, service, finance, and audit records. |
+| Roberto | Available across `/panel` | AI assistant for operational questions, record lookup, guided creation, and confirmed actions. |
 
 ## Global Search
 
@@ -61,6 +62,27 @@ The header search redirects to `/panel/busca` and queries the main records assoc
 - Audit logs
 
 Results are grouped by module, with quick links to open the corresponding area.
+
+## Roberto AI Assistant
+
+Roberto is the AI chat assistant available throughout the internal panel through `src/components/roberto/roberto-widget.jsx`.
+
+The widget opens as a floating chat, keeps the current conversation in `sessionStorage`, shows quick-start suggestions, and sends authenticated requests to `/api/roberto`. The server-side route calls OpenRouter using `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`, builds the account context from the logged-in user, and restricts data access to the current `conta_id`.
+
+Roberto can help with:
+
+- Searching services, repair shops, technicians, vehicles, financial entries, DRE, audit logs, users, and settings.
+- Answering how-to questions about real PDR Hub screens and flows.
+- Preparing creation or update operations for repair shops, technicians, vehicles, services, and financial settlements.
+- Showing a confirmation card before any write operation is committed.
+
+Write operations follow a two-step flow:
+
+1. The assistant gathers and validates the required data.
+2. The user confirms the generated preview in the chat UI.
+3. The server executes the confirmed action, records audit information when applicable, and the widget emits `roberto:data-changed` so panel screens can refresh their data.
+
+The chat intentionally treats stored records and compact session state as untrusted data. Roberto must use the exposed tools for real platform data, cannot choose ambiguous records silently, and cannot complete a write from a plain text confirmation message.
 
 ## Authentication and Account
 
@@ -148,13 +170,15 @@ src/
   app/
     (auth)/             Login, signup, and password recovery
     (panel)/panel/      Internal platform modules
-    api/                Auth, current user, and user routes
+    api/                Auth, current user, user routes, and Roberto
     layout.js           Metadata, providers, and icons
   components/
     layout/             Header, sidebar, shell, and auth screens
+    roberto/            Floating AI assistant chat widget
     shared/             Button, Modal, Drawer, Form, Table
     providers/          Theme and toast
   lib/
+    roberto/            Roberto context, tools, confirmations, and audit helpers
     supabase/           Browser, server, and admin clients
     dates.js            Civil dates and timezone
     formatters.js       BR/IT formatters
@@ -179,8 +203,6 @@ OPENROUTER_MODEL=
 `SUPABASE_SERVICE_ROLE_KEY` is used only on the server for administrative operations, such as creating users in Supabase Auth.
 
 `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` enable Roberto, the operational assistant available throughout `/panel`. Both variables are read only by the server-side Route Handler. Use an OpenRouter model with reliable tool/function calling support; changing the model requires only updating `OPENROUTER_MODEL` and restarting the application.
-
-See [`ROBERTO.md`](ROBERTO.md) for architecture, tools, confirmation flows, security rules, and operational details.
 
 ## Commands
 

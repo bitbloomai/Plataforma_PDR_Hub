@@ -89,6 +89,10 @@ function isExpense(row) {
   return String(row?.tipo || "").toLowerCase() === "despesa";
 }
 
+function isCancelledService(service) {
+  return String(service?.status || "").toLowerCase() === "cancelado";
+}
+
 function dateDiffInDays(from, to) {
   const start = new Date(`${from}T12:00:00`);
   const end = new Date(`${to}T12:00:00`);
@@ -210,11 +214,12 @@ function downloadCsv({ services, metrics, from, to, formatMoney, config }) {
         title: "Resumo executivo",
         headers: ["Indicador", "Valor"],
         rows: [
-          ["Faturamento", formatMoney(metrics.faturamento)],
+          ["Receita prevista", formatMoney(metrics.receitaPrevista)],
           ["Recebido", formatMoney(metrics.recebido)],
           ["A receber", formatMoney(metrics.aReceber)],
-          ["Despesas", formatMoney(metrics.despesas)],
-          ["Resultado", formatMoney(metrics.resultado)],
+          ["Despesas previstas", formatMoney(metrics.despesas)],
+          ["Resultado previsto", formatMoney(metrics.resultado)],
+          ["Saldo realizado", formatMoney(metrics.saldoRealizado)],
           ["Ticket medio", formatMoney(metrics.ticketMedio)],
         ],
       },
@@ -320,6 +325,7 @@ async function loadDashboardRaw({ supabase, contaId, from, to, officeId, force =
           conta_id,
           oficina_id,
           veiculo_id,
+          status,
           data_servico,
           valor,
           descricao,
@@ -440,17 +446,14 @@ function LineAreaChart({ data, compactMoney }) {
   const pad = { left: 54, right: 24, top: 30, bottom: 48 };
   const plotWidth = width - pad.left - pad.right;
   const plotHeight = height - pad.top - pad.bottom;
-  const maxValue = Math.max(
-    ...data.flatMap((item) => [item.faturamento, item.despesa]),
-    1
-  );
+  const maxValue = Math.max(...data.flatMap((item) => [item.receita, item.despesa]), 1);
   const x = (index) => pad.left + (index * plotWidth) / Math.max(1, data.length - 1);
   const y = (value) => pad.top + plotHeight - (value / maxValue) * plotHeight;
-  const revenuePoints = data.map((item, index) => [x(index), y(item.faturamento)]);
+  const revenuePoints = data.map((item, index) => [x(index), y(item.receita)]);
   const expensePoints = data.map((item, index) => [x(index), y(item.despesa)]);
   const bottomY = pad.top + plotHeight;
   const tickIndexes = [...new Set([0, Math.floor((data.length - 1) / 2), data.length - 1])];
-  const totalRevenue = sumBy(data, (item) => item.faturamento);
+  const totalRevenue = sumBy(data, (item) => item.receita);
   const totalExpense = sumBy(data, (item) => item.despesa);
   const result = totalRevenue - totalExpense;
 
@@ -477,9 +480,9 @@ function LineAreaChart({ data, compactMoney }) {
     <div className="w-full">
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         {[
-          ["Faturamento", totalRevenue, "bg-primary"],
-          ["Despesas", totalExpense, "bg-danger"],
-          ["Resultado", result, result >= 0 ? "bg-success" : "bg-danger"],
+          ["Receita prevista", totalRevenue, "bg-primary"],
+          ["Despesas previstas", totalExpense, "bg-danger"],
+          ["Resultado previsto", result, result >= 0 ? "bg-success" : "bg-danger"],
         ].map(([label, value, color]) => (
           <div key={label} className="rounded-lg border border-border bg-background p-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -556,7 +559,7 @@ function LineAreaChart({ data, compactMoney }) {
             <g key={item.key}>
               <circle
                 cx={x(index)}
-                cy={y(item.faturamento)}
+                cy={y(item.receita)}
                 r="3.5"
                 fill="var(--surface)"
                 stroke="var(--primary)"
@@ -586,14 +589,14 @@ function LineAreaChart({ data, compactMoney }) {
           </text>
         ))}
 
-          <g transform={`translate(${width - 190} 8)`}>
+          <g transform={`translate(${width - 220} 8)`}>
             <circle cx="0" cy="0" r="4" fill="var(--primary)" />
             <text x="10" y="4" fontSize="11" fill="var(--muted-foreground)">
-              Faturamento
+              Receita prev.
             </text>
-            <circle cx="96" cy="0" r="4" fill="var(--danger)" />
-            <text x="106" y="4" fontSize="11" fill="var(--muted-foreground)">
-              Despesas
+            <circle cx="116" cy="0" r="4" fill="var(--danger)" />
+            <text x="126" y="4" fontSize="11" fill="var(--muted-foreground)">
+              Despesa prev.
             </text>
           </g>
         </svg>
@@ -883,10 +886,13 @@ export default function DashboardPage() {
       (movement) => String(movement.origem || "").toLowerCase() === "repasse_tecnico"
     );
 
-    const faturamento = sumBy(services, (service) => service.valor);
+    const billableServices = services.filter((service) => !isCancelledService(service));
+    const faturamento = sumBy(billableServices, (service) => service.valor);
     const recebido = sumBy(revenues.filter((movement) => isPaid(movement.status)), (m) => m.valor);
     const aReceber = sumBy(revenues.filter((movement) => !isPaid(movement.status)), (m) => m.valor);
     const despesas = sumBy(expenses, (movement) => movement.valor);
+    const despesasPagas = sumBy(expenses.filter((movement) => isPaid(movement.status)), (m) => m.valor);
+    const despesasPendentes = sumBy(expenses.filter((movement) => !isPaid(movement.status)), (m) => m.valor);
     const receitas = sumBy(revenues, (movement) => movement.valor);
     const repassesPagos = sumBy(
       techTransfers.filter((movement) => isPaid(movement.status)),
@@ -899,15 +905,19 @@ export default function DashboardPage() {
 
     return {
       faturamento,
+      receitaPrevista: receitas,
       recebido,
       aReceber,
       despesas,
+      despesasPagas,
+      despesasPendentes,
       resultado: receitas - despesas,
+      saldoRealizado: recebido - despesasPagas,
       repassesPagos,
       repassesPendentes,
-      quantidadeServicos: services.length,
-      ticketMedio: services.length ? faturamento / services.length : 0,
-      oficinasAtendidas: new Set(services.map((service) => service.oficina_id)).size,
+      quantidadeServicos: billableServices.length,
+      ticketMedio: billableServices.length ? faturamento / billableServices.length : 0,
+      oficinasAtendidas: new Set(billableServices.map((service) => service.oficina_id)).size,
       tecnicosAtivos: technicianId ? 1 : technicians.length,
     };
   }, [movements, services, technicianId, technicians.length]);
@@ -986,13 +996,18 @@ export default function DashboardPage() {
         ["Servicos", services.length],
       ],
       summaryCards: [
-        { label: "Faturamento", value: formatMoney(metrics.faturamento) },
+        { label: "Receita prevista", value: formatMoney(metrics.receitaPrevista) },
         { label: "Recebido", value: formatMoney(metrics.recebido), tone: "success" },
         { label: "A receber", value: formatMoney(metrics.aReceber), tone: "warning" },
         {
-          label: "Resultado",
+          label: "Resultado previsto",
           value: formatMoney(metrics.resultado),
           tone: metrics.resultado >= 0 ? "success" : "danger",
+        },
+        {
+          label: "Saldo realizado",
+          value: formatMoney(metrics.saldoRealizado),
+          tone: metrics.saldoRealizado >= 0 ? "success" : "danger",
         },
       ],
       sections: [
@@ -1000,7 +1015,9 @@ export default function DashboardPage() {
           title: "Resumo executivo",
           headers: ["Indicador", "Valor"],
           rows: [
-            ["Despesas", formatMoney(metrics.despesas)],
+            ["Despesas previstas", formatMoney(metrics.despesas)],
+            ["Despesas pagas", formatMoney(metrics.despesasPagas)],
+            ["Despesas pendentes", formatMoney(metrics.despesasPendentes)],
             ["Repasses pagos", formatMoney(metrics.repassesPagos)],
             ["Repasses pendentes", formatMoney(metrics.repassesPendentes)],
             ["Ticket medio", formatMoney(metrics.ticketMedio)],
@@ -1182,11 +1199,11 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard
-          label="Faturamento"
-          value={formatMoney(metrics.faturamento)}
-          caption="Serviços no período"
+          label="Receita prevista"
+          value={formatMoney(metrics.receitaPrevista)}
+          caption="Receitas por competência"
           icon={TrendingUp}
         />
         <MetricCard
@@ -1204,11 +1221,18 @@ export default function DashboardPage() {
           tone="warning"
         />
         <MetricCard
-          label="Resultado"
+          label="Resultado previsto"
           value={formatMoney(metrics.resultado)}
-          caption="Receitas menos despesas"
+          caption="Previsto menos despesas"
           icon={Gauge}
           tone={metrics.resultado >= 0 ? "success" : "danger"}
+        />
+        <MetricCard
+          label="Saldo realizado"
+          value={formatMoney(metrics.saldoRealizado)}
+          caption="Recebido menos pago"
+          icon={WalletCards}
+          tone={metrics.saldoRealizado >= 0 ? "success" : "danger"}
         />
       </div>
 
@@ -1217,10 +1241,10 @@ export default function DashboardPage() {
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-base font-semibold text-foreground sm:text-lg">
-                Faturamento por período
+                Receita prevista por período
               </h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Evolução dos serviços dentro dos filtros atuais.
+                Evolução das receitas por competência dentro dos filtros atuais.
               </p>
             </div>
             <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground">
@@ -1295,7 +1319,7 @@ export default function DashboardPage() {
                   <ArrowDownRight className="size-4" strokeWidth={1.8} />
                 </span>
                 <div>
-                  <p className="text-xs text-muted-foreground">Despesas</p>
+                  <p className="text-xs text-muted-foreground">Despesas previstas</p>
                   <p className="text-sm font-semibold text-foreground">{formatMoney(metrics.despesas)}</p>
                 </div>
               </div>
@@ -1465,11 +1489,6 @@ export default function DashboardPage() {
           )}
         </Card>
       </div>
-
-      <p className="pb-2 text-center text-[11px] text-muted-foreground">
-        Cache local de 30s + paginação em fila de até {MAX_ROWS.toLocaleString("pt-BR")} registros por
-        conjunto. A resposta mais recente sempre vence, evitando dados antigos sobrescreverem filtros novos.
-      </p>
     </div>
   );
 }
