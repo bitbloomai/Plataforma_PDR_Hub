@@ -79,7 +79,10 @@ export function Table({
   const currentSort = controlledSort !== undefined ? controlledSort : internalSort;
   const currentPage = controlledPage !== undefined ? controlledPage : internalPage;
 
-  useEffect(() => setRowsPerPage(pageSize), [pageSize]);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setRowsPerPage(pageSize));
+    return () => cancelAnimationFrame(frame);
+  }, [pageSize]);
 
   const searchedData = useMemo(() => {
     if (manualFiltering || !searchable || !currentSearch.trim()) return data;
@@ -130,9 +133,13 @@ export function Table({
 
   useEffect(() => {
     if (currentPage > totalPages) {
-      if (controlledPage === undefined) setInternalPage(totalPages);
-      onPageChange?.(totalPages);
+      const frame = requestAnimationFrame(() => {
+        if (controlledPage === undefined) setInternalPage(totalPages);
+        onPageChange?.(totalPages);
+      });
+      return () => cancelAnimationFrame(frame);
     }
+    return undefined;
   }, [controlledPage, currentPage, onPageChange, totalPages]);
 
   const visibleRows = useMemo(() => {

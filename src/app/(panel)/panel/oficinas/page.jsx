@@ -630,11 +630,15 @@ export default function OficinasPage() {
   const totalPages = Math.max(1, Math.ceil(filteredOffices.length / pageSize));
 
   useEffect(() => {
-    setPage(1);
+    const frame = requestAnimationFrame(() => setPage(1));
+    return () => cancelAnimationFrame(frame);
   }, [search, statusFilter, cityFilter, pageSize]);
 
   useEffect(() => {
-    setPage((current) => Math.min(current, totalPages));
+    const frame = requestAnimationFrame(() => {
+      setPage((current) => Math.min(current, totalPages));
+    });
+    return () => cancelAnimationFrame(frame);
   }, [totalPages]);
 
   const pagedOffices = useMemo(() => {

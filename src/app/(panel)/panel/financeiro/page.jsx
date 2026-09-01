@@ -131,7 +131,7 @@ function getPresetRange(preset, timezone) {
 
   return {
     from: localISO(new Date(today.getFullYear(), today.getMonth(), 1)),
-    to: localISO(today),
+    to: localISO(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
   };
 }
 
@@ -786,11 +786,14 @@ export default function FinanceiroPage() {
   const totalPages = Math.max(1, Math.ceil(filteredMovements.length / pageSize));
 
   useEffect(() => {
-    setPage(1);
+    const frame = requestAnimationFrame(() => setPage(1));
+    return () => cancelAnimationFrame(frame);
   }, [activeTab, categoryFilter, officeFilter, pageSize, search, statusFilter, technicianFilter]);
 
   useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
+    if (page <= totalPages) return undefined;
+    const frame = requestAnimationFrame(() => setPage(totalPages));
+    return () => cancelAnimationFrame(frame);
   }, [page, totalPages]);
 
   const pagedMovements = useMemo(() => {

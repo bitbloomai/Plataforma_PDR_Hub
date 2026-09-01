@@ -180,7 +180,16 @@ function getPresetRange(preset) {
 
   return {
     from: localISO(new Date(today.getFullYear(), today.getMonth(), 1, 12)),
-    to: localISO(today),
+    to: localISO(new Date(today.getFullYear(), today.getMonth() + 1, 0, 12)),
+  };
+}
+
+function getPreviousCalendarMonthRange(from) {
+  const start = parseLocalISO(from);
+  if (!start) return { from, to: from };
+  return {
+    from: localISO(new Date(start.getFullYear(), start.getMonth() - 1, 1, 12)),
+    to: localISO(new Date(start.getFullYear(), start.getMonth(), 0, 12)),
   };
 }
 
@@ -814,7 +823,13 @@ export default function DrePage() {
   const currency = me?.configuracao?.moeda || "EUR";
   const locale = me?.configuracao?.locale || "it-IT";
 
-  const previousRange = useMemo(() => getPreviousRange(from, to), [from, to]);
+  const previousRange = useMemo(
+    () =>
+      preset === "month" || preset === "previous_month"
+        ? getPreviousCalendarMonthRange(from)
+        : getPreviousRange(from, to),
+    [from, preset, to]
+  );
 
   const formatMoney = useCallback(
     (value) => {
@@ -1012,11 +1027,14 @@ export default function DrePage() {
   }, [detailPage, detailPageSize, filteredDetailRows]);
 
   useEffect(() => {
-    setDetailPage(1);
+    const frame = requestAnimationFrame(() => setDetailPage(1));
+    return () => cancelAnimationFrame(frame);
   }, [detailGroupFilter, detailPageSize, detailSearch]);
 
   useEffect(() => {
-    if (detailPage > detailTotalPages) setDetailPage(detailTotalPages);
+    if (detailPage <= detailTotalPages) return undefined;
+    const frame = requestAnimationFrame(() => setDetailPage(detailTotalPages));
+    return () => cancelAnimationFrame(frame);
   }, [detailPage, detailTotalPages]);
 
   const categoryUsage = useMemo(() => {
@@ -1061,11 +1079,14 @@ export default function DrePage() {
   }, [categoryPage, categoryPageSize, filteredCategories]);
 
   useEffect(() => {
-    setCategoryPage(1);
+    const frame = requestAnimationFrame(() => setCategoryPage(1));
+    return () => cancelAnimationFrame(frame);
   }, [categoryGroupFilter, categoryPageSize, categorySearch, categoryStatusFilter, categoryTypeFilter]);
 
   useEffect(() => {
-    if (categoryPage > categoryTotalPages) setCategoryPage(categoryTotalPages);
+    if (categoryPage <= categoryTotalPages) return undefined;
+    const frame = requestAnimationFrame(() => setCategoryPage(categoryTotalPages));
+    return () => cancelAnimationFrame(frame);
   }, [categoryPage, categoryTotalPages]);
 
   const categoriesWithoutValidGroup = useMemo(

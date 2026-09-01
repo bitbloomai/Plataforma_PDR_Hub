@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
+import { RobertoWidget } from "@/components/roberto/roberto-widget";
 
 const SIDEBAR_KEY = "panel.sidebar.collapsed";
 
@@ -68,6 +69,8 @@ export function PanelShell({ children }) {
           <div className="mx-auto w-full max-w-[1600px]">{children}</div>
         </main>
       </div>
+
+      <RobertoWidget />
     </div>
   );
 }

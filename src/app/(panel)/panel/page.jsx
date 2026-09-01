@@ -64,7 +64,7 @@ function getPresetRange(preset, timezone) {
 
   return {
     from: localISO(new Date(today.getFullYear(), today.getMonth(), 1)),
-    to: localISO(today),
+    to: localISO(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
   };
 }
 

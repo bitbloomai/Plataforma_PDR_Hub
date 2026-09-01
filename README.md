@@ -172,9 +172,15 @@ Create a `.env` file with:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` is used only on the server for administrative operations, such as creating users in Supabase Auth.
+
+`OPENROUTER_API_KEY` and `OPENROUTER_MODEL` enable Roberto, the operational assistant available throughout `/panel`. Both variables are read only by the server-side Route Handler. Use an OpenRouter model with reliable tool/function calling support; changing the model requires only updating `OPENROUTER_MODEL` and restarting the application.
+
+See [`ROBERTO.md`](ROBERTO.md) for architecture, tools, confirmation flows, security rules, and operational details.
 
 ## Commands
 

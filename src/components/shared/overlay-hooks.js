@@ -41,13 +41,15 @@ export function usePresence(open, duration = 200) {
     let timeout;
 
     if (open) {
-      setRendered(true);
       frame = requestAnimationFrame(() => {
+        setRendered(true);
         frame = requestAnimationFrame(() => setVisible(true));
       });
     } else {
-      setVisible(false);
-      timeout = window.setTimeout(() => setRendered(false), duration);
+      frame = requestAnimationFrame(() => {
+        setVisible(false);
+        timeout = window.setTimeout(() => setRendered(false), duration);
+      });
     }
 
     return () => {

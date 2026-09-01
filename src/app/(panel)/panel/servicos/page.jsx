@@ -46,9 +46,13 @@ import {
   Textarea,
 } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
-import { addDaysISO, localISO, todayISO } from "@/lib/dates";
+import { localISO, todayISO } from "@/lib/dates";
 import { toast } from "@/lib/toast";
 import { formatDateByConfig } from "@/lib/formatters";
+import {
+  buildServiceFinancialRows,
+  buildServiceTechnicianRows,
+} from "@/lib/service-rules";
 
 const PAGE_SIZES = [10, 20, 50];
 const SERVICE_STATUSES = ["agendado", "em_andamento", "concluido", "cancelado"];
@@ -115,7 +119,7 @@ function getPresetRange(preset, timezone) {
 
   return {
     from: localISO(new Date(today.getFullYear(), today.getMonth(), 1)),
-    to: localISO(today),
+    to: localISO(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
   };
 }
 
@@ -1398,16 +1402,15 @@ export default function ServicosPage() {
   }
 
   function buildTechnicianRows(serviceId, currentContaId, currentUsuarioId) {
-    return form.technician_ids.map((technicianId) => {
-      const percentage = safeNumber(form.percentages[technicianId]);
-      return {
-        conta_id: currentContaId,
-        servico_id: serviceId,
+    return buildServiceTechnicianRows({
+      serviceId,
+      contaId: currentContaId,
+      usuarioId: currentUsuarioId,
+      serviceValue: form.valor,
+      technicians: form.technician_ids.map((technicianId) => ({
         tecnico_id: technicianId,
-        percentual: percentage,
-        valor_repasse: roundMoney((safeNumber(form.valor) * percentage) / 100),
-        created_by: currentUsuarioId || null,
-      };
+        percentual: form.percentages[technicianId],
+      })),
     });
   }
 
@@ -1423,70 +1426,21 @@ export default function ServicosPage() {
     currentUsuarioId,
     existingMovements = [],
   }) {
-    if (status === "cancelado") return [];
-
     const days = meRef.current?.configuracao?.dias_vencimento_servico ?? me?.configuracao?.dias_vencimento_servico ?? 0;
-    const dueDate = addDaysISO(serviceDate, days);
-    const oldRevenue = existingMovements.find(
-      (movement) => isRevenue(movement) && String(movement.origem).toLowerCase() === "servico"
-    );
-    const vehicleText = [vehicleName(vehicle), vehicle?.placa].filter(Boolean).join(" · ");
-
-    const rows = [
-      {
-        conta_id: currentContaId,
-        categoria_id: oldRevenue?.categoria_id || null,
-        servico_id: serviceId,
-        tecnico_id: null,
-        oficina_id: officeId,
-        tipo: "receita",
-        origem: "servico",
-        descricao: `Serviço ${vehicleText}`,
-        valor: roundMoney(serviceValue),
-        status: "pendente",
-        data_competencia: serviceDate,
-        data_vencimento: dueDate,
-        data_pagamento: null,
-        forma_pagamento: null,
-        observacoes: oldRevenue?.observacoes || null,
-        created_by: oldRevenue?.created_by || currentUsuarioId || null,
-        updated_by: currentUsuarioId || null,
-        updated_at: new Date().toISOString(),
-      },
-    ];
-
-    technicianRows.forEach((row) => {
-      const technician = techniciansById.get(row.tecnico_id);
-      const old = existingMovements.find(
-        (movement) =>
-          isExpense(movement) &&
-          String(movement.origem).toLowerCase() === "repasse_tecnico" &&
-          movement.tecnico_id === row.tecnico_id
-      );
-
-      rows.push({
-        conta_id: currentContaId,
-        categoria_id: old?.categoria_id || null,
-        servico_id: serviceId,
-        tecnico_id: row.tecnico_id,
-        oficina_id: officeId,
-        tipo: "despesa",
-        origem: "repasse_tecnico",
-        descricao: `Repasse ${technician?.nome || "técnico"} · ${vehicle?.placa || vehicleName(vehicle)}`,
-        valor: roundMoney(row.valor_repasse),
-        status: "pendente",
-        data_competencia: serviceDate,
-        data_vencimento: old?.data_vencimento || null,
-        data_pagamento: null,
-        forma_pagamento: null,
-        observacoes: old?.observacoes || null,
-        created_by: old?.created_by || currentUsuarioId || null,
-        updated_by: currentUsuarioId || null,
-        updated_at: new Date().toISOString(),
-      });
+    return buildServiceFinancialRows({
+      serviceId,
+      serviceDate,
+      serviceValue,
+      officeId,
+      vehicle,
+      technicianRows,
+      techniciansById,
+      status,
+      contaId: currentContaId,
+      usuarioId: currentUsuarioId,
+      dueDays: days,
+      existingMovements,
     });
-
-    return rows;
   }
 
   async function rebuildFinancials(args) {

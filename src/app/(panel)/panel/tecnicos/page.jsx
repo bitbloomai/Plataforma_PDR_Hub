@@ -282,6 +282,10 @@ function fileExtension(file) {
   return "jpg";
 }
 
+function uniqueUploadSuffix() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function sortTechnicians(list) {
   return [...list].sort((a, b) => {
     if (a.ativo !== b.ativo) return a.ativo ? -1 : 1;
@@ -903,11 +907,15 @@ export default function TecnicosPage() {
   const totalPages = Math.max(1, Math.ceil(filteredTechnicians.length / pageSize));
 
   useEffect(() => {
-    setPage(1);
+    const frame = requestAnimationFrame(() => setPage(1));
+    return () => cancelAnimationFrame(frame);
   }, [search, statusFilter, nationalityFilter, allocationFilter, pageSize]);
 
   useEffect(() => {
-    setPage((current) => Math.min(current, totalPages));
+    const frame = requestAnimationFrame(() => {
+      setPage((current) => Math.min(current, totalPages));
+    });
+    return () => cancelAnimationFrame(frame);
   }, [totalPages]);
 
   const pagedTechnicians = useMemo(() => {
@@ -1058,8 +1066,7 @@ export default function TecnicosPage() {
 
   async function uploadAvatar(file, currentContaId, technicianId) {
     const extension = fileExtension(file);
-    const random = Math.random().toString(36).slice(2, 8);
-    const path = `tecnicos/${currentContaId}/${technicianId}-${Date.now()}-${random}.${extension}`;
+    const path = `tecnicos/${currentContaId}/${technicianId}-${uniqueUploadSuffix()}.${extension}`;
 
     const { error: uploadError } = await supabase.storage
       .from(AVATAR_BUCKET)
