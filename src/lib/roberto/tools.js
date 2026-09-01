@@ -374,14 +374,14 @@ async function searchTechnicians(args, context) {
     const range = resolvePeriod(args, context.configuracao.timezone);
     let linksQuery = context.db
       .from("servicos_tecnicos")
-      .select("tecnico_id,valor_repasse,percentual,servico:servicos!inner(id,data_servico,valor,status,oficina:oficinas(nome),veiculo:veiculos(placa,marca,modelo))")
+      .select("tecnico_id,valor_repasse,moeda,percentual,servico:servicos!inner(id,data_servico,valor,moeda,status,oficina:oficinas(nome),veiculo:veiculos(placa,marca,modelo))")
       .eq("conta_id", context.usuario.conta_id)
       .in("tecnico_id", ids);
     if (range.from) linksQuery = linksQuery.gte("servico.data_servico", range.from);
     if (range.to) linksQuery = linksQuery.lte("servico.data_servico", range.to);
     let movementsQuery = context.db
       .from("movimentacoes_financeiras")
-      .select("tecnico_id,valor,status,data_competencia,data_pagamento")
+      .select("tecnico_id,valor,moeda,status,data_competencia,data_pagamento")
       .eq("conta_id", context.usuario.conta_id)
       .eq("origem", "repasse_tecnico")
       .in("tecnico_id", ids);
@@ -436,7 +436,7 @@ async function searchVehicles(args, context) {
     if (!args.incluir_historico || !data.length) return { ok: true, total: data.length, veiculos: data };
     const { data: services, error: serviceError } = await context.db
       .from("servicos")
-      .select("id,veiculo_id,data_servico,valor,status,descricao,oficina:oficinas(id,nome),servicos_tecnicos(tecnico:tecnicos(id,nome),percentual,valor_repasse)")
+      .select("id,veiculo_id,data_servico,valor,moeda,status,descricao,oficina:oficinas(id,nome),servicos_tecnicos(tecnico:tecnicos(id,nome),percentual,valor_repasse,moeda)")
       .eq("conta_id", context.usuario.conta_id)
       .in("veiculo_id", data.map((item) => item.id))
       .order("data_servico", { ascending: false })
@@ -460,7 +460,7 @@ async function searchServices(args, context) {
     const range = resolvePeriod(args, context.configuracao.timezone);
     let query = context.db
       .from("servicos")
-      .select("id,oficina_id,veiculo_id,data_servico,valor,status,descricao,observacoes,created_at,updated_at,oficina:oficinas(id,nome,ativo),veiculo:veiculos(id,placa,marca,modelo,ano,cor),servicos_tecnicos(tecnico_id,percentual,valor_repasse,tecnico:tecnicos(id,nome,ativo)),movimentacoes_financeiras(id,tipo,origem,valor,status,data_competencia,data_vencimento,data_pagamento,tecnico_id)")
+      .select("id,oficina_id,veiculo_id,data_servico,valor,moeda,status,descricao,observacoes,created_at,updated_at,oficina:oficinas(id,nome,ativo),veiculo:veiculos(id,placa,marca,modelo,ano,cor),servicos_tecnicos(tecnico_id,percentual,valor_repasse,moeda,tecnico:tecnicos(id,nome,ativo)),movimentacoes_financeiras(id,tipo,origem,valor,moeda,status,data_competencia,data_vencimento,data_pagamento,tecnico_id)")
       .eq("conta_id", context.usuario.conta_id);
     if (args.id) query = query.eq("id", args.id);
     if (args.oficina_id) query = query.eq("oficina_id", args.oficina_id);
@@ -504,7 +504,7 @@ async function queryFinancial(args, context) {
     const range = resolvePeriod(args, context.configuracao.timezone);
     let query = context.db
       .from("movimentacoes_financeiras")
-      .select("id,categoria_id,servico_id,tecnico_id,oficina_id,tipo,origem,descricao,valor,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,observacoes,oficina:oficinas(id,nome),tecnico:tecnicos(id,nome),categoria:categorias_financeiras(id,nome,grupo_dre)")
+      .select("id,categoria_id,servico_id,tecnico_id,oficina_id,tipo,origem,descricao,valor,moeda,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,observacoes,oficina:oficinas(id,nome),tecnico:tecnicos(id,nome),categoria:categorias_financeiras(id,nome,grupo_dre)")
       .eq("conta_id", context.usuario.conta_id);
     if (args.tipo && args.tipo !== "todos") query = query.eq("tipo", args.tipo);
     if (args.status === "pago") query = query.in("status", ["pago", "recebido", "paid"]);
@@ -570,7 +570,7 @@ async function queryDre(args, context) {
     const range = resolvePeriod({ ...args, periodo: args.periodo || "este_mes" }, context.configuracao.timezone);
     let query = context.db
       .from("movimentacoes_financeiras")
-      .select("id,tipo,origem,valor,status,data_competencia,categoria:categorias_financeiras(id,nome,tipo,grupo_dre,cor,ativo)")
+      .select("id,tipo,origem,valor,moeda,status,data_competencia,categoria:categorias_financeiras(id,nome,tipo,grupo_dre,cor,ativo)")
       .eq("conta_id", context.usuario.conta_id);
     query = applyDateRange(query, "data_competencia", range);
     const { data, error } = await query.limit(10000);
@@ -981,7 +981,7 @@ async function commitVehicle(args, context) {
 async function getServiceSnapshot(id, context) {
   const { data, error } = await context.db
     .from("servicos")
-    .select("id,conta_id,oficina_id,veiculo_id,data_servico,valor,status,descricao,observacoes,created_by,updated_by,created_at,updated_at,oficina:oficinas(id,nome,ativo),veiculo:veiculos(id,placa,marca,modelo,ano,cor),servicos_tecnicos(id,conta_id,servico_id,tecnico_id,percentual,valor_repasse,created_by,created_at,tecnico:tecnicos(id,nome,ativo)),movimentacoes_financeiras(id,conta_id,categoria_id,servico_id,tecnico_id,oficina_id,tipo,origem,descricao,valor,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,observacoes,created_by,updated_by,created_at,updated_at)")
+    .select("id,conta_id,oficina_id,veiculo_id,data_servico,valor,moeda,status,descricao,observacoes,created_by,updated_by,created_at,updated_at,oficina:oficinas(id,nome,ativo),veiculo:veiculos(id,placa,marca,modelo,ano,cor),servicos_tecnicos(id,conta_id,servico_id,tecnico_id,percentual,valor_repasse,moeda,created_by,created_at,tecnico:tecnicos(id,nome,ativo)),movimentacoes_financeiras(id,conta_id,categoria_id,servico_id,tecnico_id,oficina_id,tipo,origem,descricao,valor,moeda,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,observacoes,created_by,updated_by,created_at,updated_at)")
     .eq("conta_id", context.usuario.conta_id)
     .eq("id", id)
     .maybeSingle();
@@ -1097,6 +1097,7 @@ async function servicePlan(args, context) {
       veiculo_id: vehicle.id,
       data_servico: draft.dataServico,
       valor: roundMoney(draft.valor),
+      moeda: context.configuracao.moeda || "EUR",
       status: draft.status,
       descricao: cleanText(mergedValue(args, before, "descricao")),
       observacoes: cleanText(mergedValue(args, before, "observacoes")),
@@ -1145,6 +1146,7 @@ async function rebuildServiceFinancials(plan, serviceId, context) {
     usuarioId: context.usuario.id,
     serviceValue: plan.payload.valor,
     technicians: plan.technicianDrafts,
+    currency: context.configuracao.moeda || "EUR",
   });
   const deleteResult = await context.db
     .from("movimentacoes_financeiras")
@@ -1166,6 +1168,7 @@ async function rebuildServiceFinancials(plan, serviceId, context) {
     usuarioId: context.usuario.id,
     dueDays: context.configuracao.dias_vencimento_servico || 0,
     existingMovements: automaticMovements(plan.before),
+    currency: context.configuracao.moeda || "EUR",
   });
   if (rows.length) {
     const result = await context.db.from("movimentacoes_financeiras").insert(rows);
@@ -1184,6 +1187,7 @@ async function restoreServiceSnapshot(snapshot, context) {
         veiculo_id: snapshot.veiculo_id,
         data_servico: snapshot.data_servico,
         valor: snapshot.valor,
+        moeda: snapshot.moeda || "EUR",
         status: snapshot.status,
         descricao: snapshot.descricao,
         observacoes: snapshot.observacoes,
@@ -1270,6 +1274,7 @@ async function commitService(args, context) {
         usuarioId: context.usuario.id,
         serviceValue: plan.payload.valor,
         technicians: plan.technicianDrafts,
+        currency: context.configuracao.moeda || "EUR",
       });
       const linkResult = await context.db.from("servicos_tecnicos").insert(technicianRows);
       throwIfDb(linkResult.error);
@@ -1330,7 +1335,7 @@ async function financialPlan(args, context) {
   }
   const { data, error } = await context.db
     .from("movimentacoes_financeiras")
-    .select("id,tipo,origem,descricao,valor,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,observacoes,oficina:oficinas(nome),tecnico:tecnicos(nome)")
+    .select("id,tipo,origem,descricao,valor,moeda,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,observacoes,oficina:oficinas(nome),tecnico:tecnicos(nome)")
     .eq("conta_id", context.usuario.conta_id)
     .eq("id", args.id)
     .maybeSingle();
@@ -1383,7 +1388,7 @@ async function commitFinancial(args, context) {
     .update(plan.payload)
     .eq("conta_id", context.usuario.conta_id)
     .eq("id", args.id)
-    .select("id,tipo,descricao,valor,status,data_pagamento,forma_pagamento,updated_at")
+    .select("id,tipo,descricao,valor,moeda,status,data_pagamento,forma_pagamento,updated_at")
     .single();
   throwIfDb(error);
   const action = args.operacao === "liquidar" ? (plan.before.tipo === "receita" ? "receber" : "pagar") : "reabrir";

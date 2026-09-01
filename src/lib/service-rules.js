@@ -86,6 +86,7 @@ export function buildServiceTechnicianRows({
   usuarioId,
   serviceValue,
   technicians,
+  currency = "EUR",
 }) {
   return technicians.map((item) => {
     const percentage = safeNumber(item.percentual);
@@ -95,6 +96,7 @@ export function buildServiceTechnicianRows({
       tecnico_id: item.tecnico_id,
       percentual: percentage,
       valor_repasse: roundMoney((safeNumber(serviceValue) * percentage) / 100),
+      moeda: currency,
       created_by: usuarioId || null,
     };
   });
@@ -117,6 +119,7 @@ export function buildServiceFinancialRows({
   usuarioId,
   dueDays = 0,
   existingMovements = [],
+  currency = "EUR",
 }) {
   if (status === "cancelado") return [];
 
@@ -143,6 +146,7 @@ export function buildServiceFinancialRows({
       origem: "servico",
       descricao: `Serviço ${vehicleText}`,
       valor: roundMoney(serviceValue),
+      moeda: currency,
       status: "pendente",
       data_competencia: serviceDate,
       data_vencimento: dueDate,
@@ -174,6 +178,7 @@ export function buildServiceFinancialRows({
       origem: "repasse_tecnico",
       descricao: `Repasse ${technician?.nome || "técnico"} · ${vehicle?.placa || vehicleName(vehicle)}`,
       valor: roundMoney(row.valor_repasse),
+      moeda: row.moeda || currency,
       status: "pendente",
       data_competencia: serviceDate,
       data_vencimento: old?.data_vencimento || null,

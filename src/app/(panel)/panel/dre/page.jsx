@@ -41,6 +41,7 @@ import {
   Table,
 } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
+import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
 import { formatDateByConfig } from "@/lib/formatters";
 import { toast } from "@/lib/toast";
@@ -105,6 +106,7 @@ const MOVEMENT_SELECT = `
   origem,
   descricao,
   valor,
+  moeda,
   status,
   data_competencia,
   created_at,
@@ -832,18 +834,14 @@ export default function DrePage() {
   );
 
   const formatMoney = useCallback(
-    (value) => {
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 2,
-        }).format(safeNumber(value));
-      } catch {
-        return `${currency} ${safeNumber(value).toFixed(2)}`;
-      }
-    },
-    [currency, locale]
+    (value, sourceCurrency) =>
+      formatDisplayMoney(value, withSourceCurrency(me?.configuracao, sourceCurrency || me?.configuracao?.moeda)),
+    [me?.configuracao]
+  );
+
+  const moneyValue = useCallback(
+    (value, sourceCurrency) => moneyFromStorage(value, withSourceCurrency(me?.configuracao, sourceCurrency), sourceCurrency),
+    [me?.configuracao]
   );
 
   const formatPercent = useCallback(
@@ -976,10 +974,27 @@ export default function DrePage() {
     setTo(range.to);
   }
 
-  const snapshot = useMemo(() => buildDreSnapshot(movements), [movements]);
+  const convertedMovements = useMemo(
+    () => movements.map((movement) => ({
+      ...movement,
+      valor: moneyValue(movement.valor, movement.moeda),
+      moeda: currency,
+    })),
+    [currency, moneyValue, movements]
+  );
+  const convertedPreviousMovements = useMemo(
+    () => previousMovements.map((movement) => ({
+      ...movement,
+      valor: moneyValue(movement.valor, movement.moeda),
+      moeda: currency,
+    })),
+    [currency, moneyValue, previousMovements]
+  );
+
+  const snapshot = useMemo(() => buildDreSnapshot(convertedMovements), [convertedMovements]);
   const previousSnapshot = useMemo(
-    () => buildDreSnapshot(previousMovements),
-    [previousMovements]
+    () => buildDreSnapshot(convertedPreviousMovements),
+    [convertedPreviousMovements]
   );
 
   const categoryComparisonRows = useMemo(

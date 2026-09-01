@@ -1,7 +1,9 @@
+﻿import { formatDisplayMoney } from "@/lib/currency";
+
 /**
  * src/lib/formatters.js
  *
- * Formatadores de exibição para sistemas Brasil + Itália.
+ * Formatadores de exibiÃ§Ã£o para sistemas Brasil + ItÃ¡lia.
  * Use este arquivo para mostrar dados formatados na interface.
  */
 
@@ -154,29 +156,8 @@ export function formatDateTimeByConfig(value, config) {
 
 export function formatMoneyByConfig(value, config) {
   if (value === null || value === undefined || value === "") return "";
-
-  const number =
-    typeof value === "number"
-      ? value
-      : Number(String(value).trim().replace(/[€R$\s]/g, "").replace(/\./g, "").replace(",", "."));
-
-  if (!Number.isFinite(number)) return "";
-
-  const currency = config?.moeda || "EUR";
-  const locale = configLocale(config);
-
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(number);
-  } catch {
-    return `${currency} ${number.toFixed(2)}`;
-  }
+  return formatDisplayMoney(value, config);
 }
-
 
 /* =========================================================
    MOEDAS
@@ -197,7 +178,7 @@ export function formatEuro(value, locale = "it-IT") {
       : Number(
           String(value)
             .trim()
-            .replace(/[€\s]/g, "")
+            .replace(/[â‚¬\s]/g, "")
             .replace(/\./g, "")
             .replace(",", ".")
         );
@@ -273,14 +254,14 @@ export function formatCNPJ(value) {
 
 
 /* =========================================================
-   DOCUMENTOS ITÁLIA
+   DOCUMENTOS ITÃLIA
 ========================================================= */
 
 /**
  * Codice Fiscale
  *
- * Possui 16 caracteres alfanuméricos.
- * Normalmente não usa pontuação.
+ * Possui 16 caracteres alfanumÃ©ricos.
+ * Normalmente nÃ£o usa pontuaÃ§Ã£o.
  */
 export function formatCodiceFiscale(value) {
   return String(value ?? "")
@@ -294,7 +275,7 @@ export function formatCodiceFiscale(value) {
  * Partita IVA
  *
  * Documento fiscal de empresa italiana.
- * Possui 11 dígitos.
+ * Possui 11 dÃ­gitos.
  */
 export function formatPartitaIVA(value) {
   return onlyDigits(value).slice(0, 11);
@@ -302,7 +283,7 @@ export function formatPartitaIVA(value) {
 
 
 /* =========================================================
-   ENDEREÇO
+   ENDEREÃ‡O
 ========================================================= */
 
 export function formatCEP(value) {
@@ -319,8 +300,8 @@ export function formatCEP(value) {
 /**
  * CAP italiano
  *
- * Código postal italiano.
- * Possui 5 dígitos.
+ * CÃ³digo postal italiano.
+ * Possui 5 dÃ­gitos.
  */
 export function formatCAP(value) {
   return onlyDigits(value).slice(0, 5);
@@ -372,13 +353,13 @@ export function formatPhoneBRInternational(value) {
 
 
 /* =========================================================
-   TELEFONES ITÁLIA
+   TELEFONES ITÃLIA
 ========================================================= */
 
 /**
- * Telefones italianos possuem comprimentos variáveis.
+ * Telefones italianos possuem comprimentos variÃ¡veis.
  *
- * Celulares normalmente começam com 3.
+ * Celulares normalmente comeÃ§am com 3.
  *
  * Exemplos:
  * +39 347 123 4567
@@ -440,7 +421,7 @@ export function formatPhoneIT(value) {
 
 
 /* =========================================================
-   FORMATADORES GENÉRICOS POR PAÍS
+   FORMATADORES GENÃ‰RICOS POR PAÃS
 ========================================================= */
 
 export function formatPhone(
@@ -481,3 +462,4 @@ export function formatPostalCode(
     ? formatCAP(value)
     : formatCEP(value);
 }
+

@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 
+import { fetchLatestExchangeRates, normalizeCurrency } from "@/lib/currency";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -81,6 +82,23 @@ export async function GET() {
       );
     }
 
+    const baseConfiguracao = configuracao || {
+      moeda: "EUR",
+      locale: "it-IT",
+      timezone: "Europe/Rome",
+      formato_data: "DD/MM/YYYY",
+      nome_sistema: "Gestao de Servicos",
+      dias_vencimento_servico: 0,
+    };
+    const currency = normalizeCurrency(baseConfiguracao.moeda);
+    let cambio = { base: "EUR", quote: currency, rates: { EUR: 1 }, date: null, provider: "fallback" };
+
+    try {
+      cambio = await fetchLatestExchangeRates(currency);
+    } catch (rateError) {
+      console.warn("GET /api/me cambio", rateError);
+    }
+
     return NextResponse.json(
       {
         usuario: {
@@ -99,13 +117,10 @@ export async function GET() {
               foto_url: resolvePublicProfileUrl(conta.foto_url),
             }
           : null,
-        configuracao: configuracao || {
-          moeda: "EUR",
-          locale: "it-IT",
-          timezone: "Europe/Rome",
-          formato_data: "DD/MM/YYYY",
-          nome_sistema: "Gestão de Serviços",
-          dias_vencimento_servico: 0,
+        configuracao: {
+          ...baseConfiguracao,
+          moeda: currency,
+          cambio,
         },
       },
       {

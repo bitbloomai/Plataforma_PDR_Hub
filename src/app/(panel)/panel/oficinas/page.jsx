@@ -38,6 +38,7 @@ import {
   Textarea,
 } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
+import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { toast } from "@/lib/toast";
 import { formatDate, formatPhone, formatPostalCode } from "@/lib/formatters";
 import { maskPhone, maskPostalCode } from "@/lib/inputMasks";
@@ -536,21 +537,14 @@ export default function OficinasPage() {
   }, [loadData]);
 
   const formatMoney = useCallback(
-    (value) => {
-      const currency = me?.configuracao?.moeda || "EUR";
-      const locale = me?.configuracao?.locale || "it-IT";
+    (value, sourceCurrency) =>
+      formatDisplayMoney(value, withSourceCurrency(me?.configuracao, sourceCurrency || me?.configuracao?.moeda)),
+    [me?.configuracao]
+  );
 
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 2,
-        }).format(safeNumber(value));
-      } catch {
-        return `${currency} ${safeNumber(value).toFixed(2)}`;
-      }
-    },
-    [me]
+  const moneyValue = useCallback(
+    (value, sourceCurrency) => moneyFromStorage(value, withSourceCurrency(me?.configuracao, sourceCurrency), sourceCurrency),
+    [me?.configuracao]
   );
 
   const formatDateTime = useCallback(
@@ -862,6 +856,7 @@ export default function OficinasPage() {
                 veiculo_id,
                 data_servico,
                 valor,
+                moeda,
                 descricao,
                 created_at,
                 veiculo:veiculos(id,placa,marca,modelo,ano,cor),
@@ -875,7 +870,7 @@ export default function OficinasPage() {
             .range(0, 4999),
           supabase
             .from("movimentacoes_financeiras")
-            .select("id,valor,tipo,status,data_vencimento")
+            .select("id,valor,moeda,tipo,status,data_vencimento")
             .eq("conta_id", contaId)
             .eq("oficina_id", officeId)
             .eq("tipo", "receita")
@@ -887,7 +882,7 @@ export default function OficinasPage() {
 
         const services = servicesResult.data || [];
         const movements = movementsResult.data || [];
-        const revenue = services.reduce((sum, service) => sum + safeNumber(service.valor), 0);
+        const revenue = services.reduce((sum, service) => sum + moneyValue(service.valor, service.moeda), 0);
         const pending = movements
           .filter(
             (movement) =>
@@ -895,7 +890,7 @@ export default function OficinasPage() {
                 String(movement.status || "").toLowerCase()
               )
           )
-          .reduce((sum, movement) => sum + safeNumber(movement.valor), 0);
+          .reduce((sum, movement) => sum + moneyValue(movement.valor, movement.moeda), 0);
 
         const detail = {
           totalServices: services.length,
@@ -924,7 +919,7 @@ export default function OficinasPage() {
         setDetailLoading(false);
       }
     },
-    [contaId, supabase]
+    [contaId, moneyValue, supabase]
   );
 
   function openDetail(office) {
@@ -1815,7 +1810,7 @@ export default function OficinasPage() {
                         </p>
                       </div>
                       <p className="shrink-0 text-sm font-semibold text-foreground">
-                        {formatMoney(service.valor)}
+                        {formatMoney(service.valor, service.moeda)}
                       </p>
                     </div>
                   ))}

@@ -45,6 +45,7 @@ import {
   Textarea,
 } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
+import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { toast } from "@/lib/toast";
 import {
   formatDate,
@@ -769,7 +770,7 @@ export default function TecnicosPage() {
               .range(0, 4999),
             supabase
               .from("movimentacoes_financeiras")
-              .select("id,tecnico_id,valor,status,origem")
+              .select("id,tecnico_id,valor,moeda,status,origem")
               .eq("conta_id", currentContaId)
               .eq("origem", "repasse_tecnico")
               .not("tecnico_id", "is", null)
@@ -806,21 +807,14 @@ export default function TecnicosPage() {
   }, [loadData]);
 
   const formatMoney = useCallback(
-    (value) => {
-      const currency = me?.configuracao?.moeda || "EUR";
-      const locale = me?.configuracao?.locale || "it-IT";
+    (value, sourceCurrency) =>
+      formatDisplayMoney(value, withSourceCurrency(me?.configuracao, sourceCurrency || me?.configuracao?.moeda)),
+    [me?.configuracao]
+  );
 
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 2,
-        }).format(safeNumber(value));
-      } catch {
-        return `${currency} ${safeNumber(value).toFixed(2)}`;
-      }
-    },
-    [me]
+  const moneyValue = useCallback(
+    (value, sourceCurrency) => moneyFromStorage(value, withSourceCurrency(me?.configuracao, sourceCurrency), sourceCurrency),
+    [me?.configuracao]
   );
 
   const formatDateTime = useCallback(
@@ -845,7 +839,7 @@ export default function TecnicosPage() {
     const allocated = new Set(links.map((link) => link.tecnico_id)).size;
     const pending = repasseMovements
       .filter((movement) => !isPaidStatus(movement.status))
-      .reduce((sum, movement) => sum + safeNumber(movement.valor), 0);
+      .reduce((sum, movement) => sum + moneyValue(movement.valor, movement.moeda), 0);
 
     return {
       total: technicians.length,
@@ -853,7 +847,7 @@ export default function TecnicosPage() {
       allocated,
       pending,
     };
-  }, [links, repasseMovements, technicians]);
+  }, [links, moneyValue, repasseMovements, technicians]);
 
   const filteredTechnicians = useMemo(() => {
     const term = normalizeText(search);
@@ -1334,11 +1328,13 @@ export default function TecnicosPage() {
                 id,
                 percentual,
                 valor_repasse,
+                moeda,
                 created_at,
                 servico:servicos!inner(
                   id,
                   data_servico,
                   valor,
+                  moeda,
                   descricao,
                   observacoes,
                   oficina_id,
@@ -1355,7 +1351,7 @@ export default function TecnicosPage() {
           supabase
             .from("movimentacoes_financeiras")
             .select(
-              "id,valor,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,servico_id"
+              "id,valor,moeda,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,servico_id"
             )
             .eq("conta_id", contaId)
             .eq("tecnico_id", technicianId)
@@ -1370,19 +1366,19 @@ export default function TecnicosPage() {
         const relations = relationsResult.data || [];
         const movements = movementsResult.data || [];
         const totalServiceValue = relations.reduce(
-          (sum, relation) => sum + safeNumber(relation.servico?.valor),
+          (sum, relation) => sum + moneyValue(relation.servico?.valor, relation.servico?.moeda),
           0
         );
         const totalGenerated = relations.reduce(
-          (sum, relation) => sum + safeNumber(relation.valor_repasse),
+          (sum, relation) => sum + moneyValue(relation.valor_repasse, relation.moeda || relation.servico?.moeda),
           0
         );
         const totalPaid = movements
           .filter((movement) => isPaidStatus(movement.status))
-          .reduce((sum, movement) => sum + safeNumber(movement.valor), 0);
+          .reduce((sum, movement) => sum + moneyValue(movement.valor, movement.moeda), 0);
         const totalPending = movements
           .filter((movement) => !isPaidStatus(movement.status))
-          .reduce((sum, movement) => sum + safeNumber(movement.valor), 0);
+          .reduce((sum, movement) => sum + moneyValue(movement.valor, movement.moeda), 0);
 
         const sortedRelations = [...relations].sort((a, b) => {
           const aDate = a.servico?.data_servico || a.created_at || "";
@@ -1416,7 +1412,7 @@ export default function TecnicosPage() {
         setDetailLoading(false);
       }
     },
-    [contaId, supabase]
+    [contaId, moneyValue, supabase]
   );
 
   function openDetail(technician) {
@@ -2692,7 +2688,7 @@ export default function TecnicosPage() {
                           <div>
                             <span className="block text-muted-foreground">Serviço</span>
                             <strong className="mt-0.5 block text-sm font-semibold text-foreground">
-                              {formatMoney(service?.valor || 0)}
+                              {formatMoney(service?.valor || 0, service?.moeda)}
                             </strong>
                           </div>
                           <div>
@@ -2707,7 +2703,7 @@ export default function TecnicosPage() {
                           <div>
                             <span className="block text-muted-foreground">Repasse</span>
                             <strong className="mt-0.5 block text-sm font-semibold text-foreground">
-                              {formatMoney(relation.valor_repasse || 0)}
+                              {formatMoney(relation.valor_repasse || 0, relation.moeda || service?.moeda)}
                             </strong>
                           </div>
                         </div>

@@ -19,6 +19,7 @@ import { toast } from "sonner";
 
 import { Button, Input } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
+import { withSourceCurrency } from "@/lib/currency";
 import { formatDateByConfig, formatMoneyByConfig } from "@/lib/formatters";
 
 const RESULT_LIMIT = 8;
@@ -145,7 +146,7 @@ export default function BuscaPage() {
         ] = await Promise.all([
           supabase
             .from("servicos")
-            .select("id,data_servico,valor,status,descricao,oficina:oficinas(nome),veiculo:veiculos(placa,marca,modelo)")
+            .select("id,data_servico,valor,moeda,status,descricao,oficina:oficinas(nome),veiculo:veiculos(placa,marca,modelo)")
             .eq("conta_id", contaId)
             .or(`descricao.ilike.${like},observacoes.ilike.${like}`)
             .order("created_at", { ascending: false })
@@ -173,7 +174,7 @@ export default function BuscaPage() {
             .limit(RESULT_LIMIT),
           supabase
             .from("movimentacoes_financeiras")
-            .select("id,tipo,origem,descricao,valor,status,data_competencia,servico_id")
+            .select("id,tipo,origem,descricao,valor,moeda,status,data_competencia,servico_id")
             .eq("conta_id", contaId)
             .or(`descricao.ilike.${like},origem.ilike.${like},status.ilike.${like}`)
             .order("data_competencia", { ascending: false })
@@ -289,7 +290,7 @@ export default function BuscaPage() {
               href="/panel/servicos"
               title={`${service.veiculo?.placa || "Sem placa"} - ${service.oficina?.nome || "Sem oficina"}`}
               subtitle={[service.descricao, formatDateByConfig(service.data_servico, config)].filter(Boolean).join(" | ")}
-              meta={formatMoneyByConfig(service.valor, config)}
+              meta={formatMoneyByConfig(service.valor, withSourceCurrency(config, service.moeda))}
             />
           ))}
         </ResultSection>
@@ -361,7 +362,7 @@ export default function BuscaPage() {
               href="/panel/financeiro"
               title={movement.descricao}
               subtitle={[movement.tipo, movement.origem, formatDateByConfig(movement.data_competencia, config)].filter(Boolean).join(" | ")}
-              meta={formatMoneyByConfig(movement.valor, config)}
+              meta={formatMoneyByConfig(movement.valor, withSourceCurrency(config, movement.moeda))}
             />
           ))}
         </ResultSection>

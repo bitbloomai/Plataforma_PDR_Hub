@@ -46,6 +46,7 @@ import {
   Textarea,
 } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
+import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { localISO, todayISO } from "@/lib/dates";
 import { toast } from "@/lib/toast";
 import { formatDateByConfig } from "@/lib/formatters";
@@ -239,11 +240,16 @@ function serviceTechnicians(service) {
   return (service?.servicos_tecnicos || []).filter(Boolean);
 }
 
-function serviceRepasseTotal(service) {
-  return serviceTechnicians(service).reduce(
-    (total, link) => total + safeNumber(link.valor_repasse),
-    0
-  );
+function serviceRepasseTotal(service, convertMoney) {
+  return serviceTechnicians(service).reduce((total, link) => {
+    const sourceCurrency = link.moeda || service?.moeda;
+    const value =
+      typeof convertMoney === "function"
+        ? convertMoney(link.valor_repasse, sourceCurrency)
+        : safeNumber(link.valor_repasse);
+
+    return total + value;
+  }, 0);
 }
 
 function initials(name) {
@@ -398,6 +404,7 @@ function TechnicianAvatar({ technician, photoUrl }) {
 function ServiceCard({
   service,
   formatMoney,
+  moneyValue,
   formatServiceDate,
   onOpen,
   onEdit,
@@ -407,8 +414,9 @@ function ServiceCard({
 }) {
   const revenue = revenueMovement(service);
   const techs = serviceTechnicians(service);
-  const repasse = serviceRepasseTotal(service);
-  const margin = safeNumber(service.valor) - repasse;
+  const serviceValue = moneyValue(service.valor, service.moeda);
+  const repasse = serviceRepasseTotal(service, moneyValue);
+  const margin = serviceValue - repasse;
 
   return (
     <article
@@ -517,7 +525,7 @@ function ServiceCard({
               Valor do serviço
             </p>
             <p className="mt-1 text-xl font-semibold tracking-tight text-foreground">
-              {formatMoney(service.valor)}
+              {formatMoney(service.valor, service.moeda)}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               Repasses: {formatMoney(repasse)}
@@ -571,6 +579,7 @@ function ServiceTable({
   services,
   photoMap,
   formatMoney,
+  moneyValue,
   formatServiceDate,
   onOpen,
   onEdit,
@@ -584,13 +593,13 @@ function ServiceTable({
         <table className="w-full min-w-[1120px] text-left text-sm">
           <thead className="bg-surface-2 text-xs text-muted-foreground">
             <tr>
-              <th className="px-5 py-3 font-medium">Servico</th>
+              <th className="px-5 py-3 font-medium">Serviço</th>
               <th className="px-5 py-3 font-medium">Oficina</th>
-              <th className="px-5 py-3 font-medium">Tecnicos</th>
+              <th className="px-5 py-3 font-medium">Técnicos</th>
               <th className="px-5 py-3 font-medium">Financeiro</th>
               <th className="px-5 py-3 text-right font-medium">Valores</th>
               <th className="px-5 py-3 text-right font-medium">Status</th>
-              <th className="px-5 py-3 text-right font-medium">Acoes</th>
+              <th className="px-5 py-3 text-right font-medium">Ações</th>
             </tr>
           </thead>
 
@@ -598,8 +607,9 @@ function ServiceTable({
             {services.map((service) => {
               const revenue = revenueMovement(service);
               const techs = serviceTechnicians(service);
-              const repasse = serviceRepasseTotal(service);
-              const margin = safeNumber(service.valor) - repasse;
+              const serviceValue = moneyValue(service.valor, service.moeda);
+              const repasse = serviceRepasseTotal(service, moneyValue);
+              const margin = serviceValue - repasse;
               const statusBusy = statusBusyId === service.id;
 
               return (
@@ -640,7 +650,7 @@ function ServiceTable({
                     <div className="flex min-w-0 items-center gap-2">
                       <Building2 className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.8} />
                       <span className="truncate font-medium text-foreground">
-                        {service.oficina?.nome || "Oficina nao encontrada"}
+                        {service.oficina?.nome || "Oficina não encontrada"}
                       </span>
                     </div>
                   </td>
@@ -669,7 +679,7 @@ function ServiceTable({
                           </span>
                         </>
                       ) : (
-                        <span className="text-sm text-muted-foreground">Sem tecnico</span>
+                        <span className="text-sm text-muted-foreground">Sem técnico</span>
                       )}
                     </div>
                   </td>
@@ -684,7 +694,7 @@ function ServiceTable({
 
                   <td className="px-5 py-5 text-right">
                     <p className="whitespace-nowrap font-semibold text-foreground">
-                      {formatMoney(service.valor)}
+                      {formatMoney(service.valor, service.moeda)}
                     </p>
                     <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
                       Repasses: {formatMoney(repasse)}
@@ -705,7 +715,7 @@ function ServiceTable({
                         disabled={statusBusy}
                         onChange={(event) => onStatusChange(service, event.target.value)}
                         className="min-w-40"
-                        aria-label={`Alterar status do servico ${service.veiculo?.placa || ""}`}
+                        aria-label={`Alterar status do serviço ${service.veiculo?.placa || ""}`}
                       >
                         {SERVICE_STATUSES.map((status) => (
                           <option key={status} value={status}>
@@ -725,8 +735,8 @@ function ServiceTable({
                       <Button
                         variant="ghost"
                         size="icon"
-                        title="Editar servico"
-                        aria-label="Editar servico"
+                        title="Editar serviço"
+                        aria-label="Editar serviço"
                         onClick={() => onEdit(service)}
                       >
                         <Pencil className="size-4" strokeWidth={1.8} />
@@ -734,8 +744,8 @@ function ServiceTable({
                       <Button
                         variant="ghost"
                         size="icon"
-                        title="Excluir servico"
-                        aria-label="Excluir servico"
+                        title="Excluir serviço"
+                        aria-label="Excluir serviço"
                         onClick={() => onDelete(service)}
                       >
                         <Trash2 className="size-4 text-danger" strokeWidth={1.8} />
@@ -825,18 +835,14 @@ export default function ServicosPage() {
   const locale = me?.configuracao?.locale || "it-IT";
 
   const formatMoney = useCallback(
-    (value) => {
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 2,
-        }).format(safeNumber(value));
-      } catch {
-        return `${currency} ${safeNumber(value).toFixed(2)}`;
-      }
-    },
-    [currency, locale]
+    (value, sourceCurrency) =>
+      formatDisplayMoney(value, withSourceCurrency(me?.configuracao, sourceCurrency || me?.configuracao?.moeda)),
+    [me?.configuracao]
+  );
+
+  const moneyValue = useCallback(
+    (value, sourceCurrency) => moneyFromStorage(value, withSourceCurrency(me?.configuracao, sourceCurrency), sourceCurrency),
+    [me?.configuracao]
   );
 
   const formatServiceDate = useCallback(
@@ -888,6 +894,7 @@ export default function ServicosPage() {
                   veiculo_id,
                   data_servico,
                   valor,
+                  moeda,
                   status,
                   descricao,
                   observacoes,
@@ -902,6 +909,7 @@ export default function ServicosPage() {
                     tecnico_id,
                     percentual,
                     valor_repasse,
+                    moeda,
                     created_by,
                     created_at,
                     tecnico:tecnicos(id,nome,email,telefone,foto_url,ativo)
@@ -916,6 +924,7 @@ export default function ServicosPage() {
                     origem,
                     descricao,
                     valor,
+                    moeda,
                     status,
                     data_competencia,
                     data_vencimento,
@@ -1133,11 +1142,16 @@ export default function ServicosPage() {
     const visibleIds = new Set(filteredServices.map((service) => service.id));
     const operativeServices = filteredServices.filter((service) => service.status !== "cancelado");
     const serviceValue = operativeServices.reduce(
-      (total, service) => total + safeNumber(service.valor),
+      (total, service) => total + moneyValue(service.valor, service.moeda),
       0
     );
     const repasses = operativeServices.reduce(
-      (total, service) => total + serviceRepasseTotal(service),
+      (total, service) =>
+        total +
+        serviceTechnicians(service).reduce(
+          (sum, link) => sum + moneyValue(link.valor_repasse, link.moeda || service.moeda),
+          0
+        ),
       0
     );
 
@@ -1148,8 +1162,8 @@ export default function ServicosPage() {
       if (!visibleIds.has(service.id)) return;
       autoMovements(service).forEach((movement) => {
         if (isSettledStatus(movement.status)) return;
-        if (isRevenue(movement)) pendingRevenue += safeNumber(movement.valor);
-        if (isExpense(movement)) pendingTechnicians += safeNumber(movement.valor);
+        if (isRevenue(movement)) pendingRevenue += moneyValue(movement.valor, movement.moeda);
+        if (isExpense(movement)) pendingTechnicians += moneyValue(movement.valor, movement.moeda);
       });
     });
 
@@ -1160,7 +1174,7 @@ export default function ServicosPage() {
       pendingTechnicians,
       grossResult: serviceValue - repasses,
     };
-  }, [filteredServices, services]);
+  }, [filteredServices, moneyValue, services]);
 
   const totalPages = Math.max(1, Math.ceil(filteredServices.length / pageSize));
 
@@ -1256,7 +1270,7 @@ export default function ServicosPage() {
       oficina_id: service.oficina_id || "",
       vehicleMode: "existing",
       veiculo_id: service.veiculo_id || "",
-      valor: safeNumber(service.valor),
+      valor: moneyValue(service.valor, service.moeda),
       technician_ids: technicianIds,
       percentages,
       descricao: service.descricao || "",
@@ -1411,6 +1425,7 @@ export default function ServicosPage() {
         tecnico_id: technicianId,
         percentual: form.percentages[technicianId],
       })),
+      currency,
     });
   }
 
@@ -1440,6 +1455,7 @@ export default function ServicosPage() {
       usuarioId: currentUsuarioId,
       dueDays: days,
       existingMovements,
+      currency,
     });
   }
 
@@ -1462,7 +1478,7 @@ export default function ServicosPage() {
       .from("movimentacoes_financeiras")
       .insert(rows)
       .select(
-        "id,categoria_id,servico_id,tecnico_id,oficina_id,tipo,origem,descricao,valor,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,observacoes,created_by,updated_by,created_at,updated_at"
+        "id,categoria_id,servico_id,tecnico_id,oficina_id,tipo,origem,descricao,valor,moeda,status,data_competencia,data_vencimento,data_pagamento,forma_pagamento,observacoes,created_by,updated_by,created_at,updated_at"
       );
 
     if (insertError) throw insertError;
@@ -1480,6 +1496,7 @@ export default function ServicosPage() {
           veiculo_id: service.veiculo_id,
           data_servico: service.data_servico,
           valor: service.valor,
+          moeda: service.moeda || "EUR",
           status: service.status,
           descricao: service.descricao,
           observacoes: service.observacoes,
@@ -1502,6 +1519,7 @@ export default function ServicosPage() {
         tecnico_id: link.tecnico_id,
         percentual: link.percentual,
         valor_repasse: link.valor_repasse,
+        moeda: link.moeda || service.moeda || "EUR",
         created_by: link.created_by || service.created_by || null,
         created_at: link.created_at || new Date().toISOString(),
       }));
@@ -1526,6 +1544,7 @@ export default function ServicosPage() {
         origem: movement.origem,
         descricao: movement.descricao,
         valor: movement.valor,
+        moeda: movement.moeda || service.moeda || "EUR",
         status: movement.status,
         data_competencia: movement.data_competencia,
         data_vencimento: movement.data_vencimento,
@@ -1609,6 +1628,7 @@ export default function ServicosPage() {
           veiculo_id: vehicle.id,
           data_servico: form.data_servico,
           valor: roundMoney(form.valor),
+          moeda: currency,
           status: form.status,
           descricao: cleanText(form.descricao),
           observacoes: cleanText(form.observacoes),
@@ -1685,6 +1705,7 @@ export default function ServicosPage() {
             tecnico_id: row.tecnico_id,
             percentual: row.percentual,
             valor_repasse: row.valor_repasse,
+            moeda: row.moeda || currency,
           })),
         };
 
@@ -1701,6 +1722,7 @@ export default function ServicosPage() {
                   tecnico_id: link.tecnico_id,
                   percentual: link.percentual,
                   valor_repasse: link.valor_repasse,
+                  moeda: link.moeda || editingService.moeda || "EUR",
                 })),
               }
             : null,
@@ -1918,13 +1940,16 @@ export default function ServicosPage() {
 
   const selectedRevenue = selectedService ? revenueMovement(selectedService) : null;
   const selectedLinks = selectedService ? serviceTechnicians(selectedService) : [];
-  const selectedRepasseTotal = selectedService ? serviceRepasseTotal(selectedService) : 0;
-  const selectedGross = selectedService
-    ? safeNumber(selectedService.valor) - selectedRepasseTotal
+  const selectedServiceValue = selectedService
+    ? moneyValue(selectedService.valor, selectedService.moeda)
     : 0;
+  const selectedRepasseTotal = selectedService
+    ? serviceRepasseTotal(selectedService, moneyValue)
+    : 0;
+  const selectedGross = selectedService ? selectedServiceValue - selectedRepasseTotal : 0;
   const selectedMargin =
-    selectedService && safeNumber(selectedService.valor) > 0
-      ? (selectedGross / safeNumber(selectedService.valor)) * 100
+    selectedService && selectedServiceValue > 0
+      ? (selectedGross / selectedServiceValue) * 100
       : 0;
 
   return (
@@ -2149,6 +2174,7 @@ export default function ServicosPage() {
           services={pagedServices}
           photoMap={photoMap}
           formatMoney={formatMoney}
+          moneyValue={moneyValue}
           formatServiceDate={formatServiceDate}
           onOpen={openDetail}
           onEdit={openEdit}
@@ -2646,7 +2672,7 @@ export default function ServicosPage() {
                 <div className="sm:text-right">
                   <p className="text-xs font-medium text-muted-foreground">Valor do serviço</p>
                   <p className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
-                    {formatMoney(selectedService.valor)}
+                    {formatMoney(selectedService.valor, selectedService.moeda)}
                   </p>
                 </div>
               </div>
@@ -2722,7 +2748,7 @@ export default function ServicosPage() {
                         </div>
                         <FinanceBadge movement={movement} />
                         <p className="text-sm font-semibold text-foreground sm:text-right">
-                          {formatMoney(link.valor_repasse)}
+                          {formatMoney(link.valor_repasse, link.moeda || selectedService?.moeda)}
                         </p>
                       </div>
                     );
@@ -2758,7 +2784,7 @@ export default function ServicosPage() {
                       <div>
                         <p className="text-xs font-medium text-muted-foreground">Recebimento da oficina</p>
                         <p className="mt-2 text-lg font-semibold text-foreground">
-                          {formatMoney(selectedRevenue?.valor ?? selectedService.valor)}
+                          {formatMoney(selectedRevenue?.valor ?? selectedService.valor, selectedRevenue?.moeda || selectedService.moeda)}
                         </p>
                       </div>
                       <FinanceBadge movement={selectedRevenue} />
@@ -2788,7 +2814,7 @@ export default function ServicosPage() {
               <div className="rounded-xl border border-border bg-surface p-4">
                 <p className="text-xs text-muted-foreground">Receita</p>
                 <p className="mt-1 text-lg font-semibold text-foreground">
-                  {formatMoney(selectedService.status === "cancelado" ? 0 : selectedService.valor)}
+                  {formatMoney(selectedService.status === "cancelado" ? 0 : selectedService.valor, selectedService.moeda)}
                 </p>
               </div>
               <div className="rounded-xl border border-border bg-surface p-4">

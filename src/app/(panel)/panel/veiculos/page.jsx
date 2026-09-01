@@ -25,6 +25,7 @@ import {
 
 import { Button, Drawer, Input, Select, Table } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
+import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { toast } from "@/lib/toast";
 import { formatDate } from "@/lib/formatters";
 
@@ -250,6 +251,7 @@ export default function VeiculosPage() {
                 veiculo_id,
                 data_servico,
                 valor,
+                moeda,
                 descricao,
                 observacoes,
                 created_by,
@@ -262,6 +264,7 @@ export default function VeiculosPage() {
                   tecnico_id,
                   percentual,
                   valor_repasse,
+                  moeda,
                   tecnico:tecnicos(id,nome,ativo)
                 )
               `
@@ -300,21 +303,14 @@ export default function VeiculosPage() {
   const dateRegion = dateCountry(locale);
 
   const formatMoney = useCallback(
-    (value) => {
-      const currency = me?.configuracao?.moeda || "EUR";
-      const currentLocale = me?.configuracao?.locale || "it-IT";
+    (value, sourceCurrency) =>
+      formatDisplayMoney(value, withSourceCurrency(me?.configuracao, sourceCurrency || me?.configuracao?.moeda)),
+    [me?.configuracao]
+  );
 
-      try {
-        return new Intl.NumberFormat(currentLocale, {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 2,
-        }).format(safeNumber(value));
-      } catch {
-        return `${currency} ${safeNumber(value).toFixed(2)}`;
-      }
-    },
-    [me]
+  const moneyValue = useCallback(
+    (value, sourceCurrency) => moneyFromStorage(value, withSourceCurrency(me?.configuracao, sourceCurrency), sourceCurrency),
+    [me?.configuracao]
   );
 
   const formatDateTime = useCallback(
@@ -364,7 +360,7 @@ export default function VeiculosPage() {
     return vehicles.map((vehicle) => {
       const history = servicesByVehicle.get(vehicle.id) || [];
       const latestService = history[0] || null;
-      const totalValue = history.reduce((sum, service) => sum + safeNumber(service.valor), 0);
+      const totalValue = history.reduce((sum, service) => sum + moneyValue(service.valor, service.moeda), 0);
 
       const historicalOffices = uniqueById(
         history.map((service) => service.oficina).filter(Boolean)
@@ -432,7 +428,7 @@ export default function VeiculosPage() {
         compactSearch: normalizeCompact(searchText),
       };
     });
-  }, [servicesByVehicle, vehicles]);
+  }, [moneyValue, servicesByVehicle, vehicles]);
 
   const offices = useMemo(() => {
     const map = new Map();
@@ -1063,7 +1059,7 @@ export default function VeiculosPage() {
                           <div className="shrink-0 sm:text-right">
                             <p className="text-xs font-medium text-muted-foreground">Valor do serviço</p>
                             <p className="mt-1 text-lg font-semibold text-foreground">
-                              {formatMoney(service.valor)}
+                              {formatMoney(service.valor, service.moeda)}
                             </p>
                           </div>
                         </div>
@@ -1085,7 +1081,7 @@ export default function VeiculosPage() {
                                     {link.tecnico?.nome || "Técnico"}
                                   </strong>
                                   <span className="text-muted-foreground">
-                                    {" "}• {formatPercent(link.percentual)} • repasse {formatMoney(link.valor_repasse)}
+                                    {" "}• {formatPercent(link.percentual)} • repasse {formatMoney(link.valor_repasse, link.moeda || service.moeda)}
                                   </span>
                                 </span>
                               ))}

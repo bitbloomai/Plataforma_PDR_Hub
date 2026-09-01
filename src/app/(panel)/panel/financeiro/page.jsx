@@ -44,6 +44,7 @@ import {
   Textarea,
 } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
+import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { localISO, todayISO } from "@/lib/dates";
 import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
 import { formatDateByConfig } from "@/lib/formatters";
@@ -79,6 +80,7 @@ const MOVEMENT_SELECT = `
   origem,
   descricao,
   valor,
+  moeda,
   status,
   data_competencia,
   data_vencimento,
@@ -539,18 +541,14 @@ export default function FinanceiroPage() {
   const timezone = me?.configuracao?.timezone || "Europe/Rome";
 
   const formatMoney = useCallback(
-    (value) => {
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 2,
-        }).format(safeNumber(value));
-      } catch {
-        return `${currency} ${safeNumber(value).toFixed(2)}`;
-      }
-    },
-    [currency, locale]
+    (value, sourceCurrency) =>
+      formatDisplayMoney(value, withSourceCurrency(me?.configuracao, sourceCurrency || me?.configuracao?.moeda)),
+    [me?.configuracao]
+  );
+
+  const moneyValue = useCallback(
+    (value, sourceCurrency) => moneyFromStorage(value, withSourceCurrency(me?.configuracao, sourceCurrency), sourceCurrency),
+    [me?.configuracao]
   );
 
   const formatDate = useCallback(
@@ -718,18 +716,18 @@ export default function FinanceiroPage() {
     const revenues = movements.filter(isRevenue);
     const expenses = movements.filter(isExpense);
 
-    const received = sumBy(revenues.filter((movement) => isPaid(movement.status)), (row) => row.valor);
+    const received = sumBy(revenues.filter((movement) => isPaid(movement.status)), (row) => moneyValue(row.valor, row.moeda));
     const pendingRevenue = sumBy(
       revenues.filter((movement) => !isPaid(movement.status)),
-      (row) => row.valor
+      (row) => moneyValue(row.valor, row.moeda)
     );
-    const paid = sumBy(expenses.filter((movement) => isPaid(movement.status)), (row) => row.valor);
+    const paid = sumBy(expenses.filter((movement) => isPaid(movement.status)), (row) => moneyValue(row.valor, row.moeda));
     const pendingExpense = sumBy(
       expenses.filter((movement) => !isPaid(movement.status)),
-      (row) => row.valor
+      (row) => moneyValue(row.valor, row.moeda)
     );
-    const totalRevenue = sumBy(revenues, (row) => row.valor);
-    const totalExpense = sumBy(expenses, (row) => row.valor);
+    const totalRevenue = sumBy(revenues, (row) => moneyValue(row.valor, row.moeda));
+    const totalExpense = sumBy(expenses, (row) => moneyValue(row.valor, row.moeda));
 
     return {
       received,
@@ -741,7 +739,7 @@ export default function FinanceiroPage() {
       periodBalance: totalRevenue - totalExpense,
       realizedBalance: received - paid,
     };
-  }, [movements]);
+  }, [moneyValue, movements]);
 
   const filteredMovements = useMemo(() => {
     const term = normalizeText(search);
@@ -898,6 +896,7 @@ export default function FinanceiroPage() {
     setMovementErrors({});
     setMovementForm({
       ...normalized,
+      valor: moneyValue(normalized.valor, movement.moeda),
       categoria_id: normalized.categoria_id || fallbackCategoryId,
     });
     setMovementOpen(true);
@@ -994,6 +993,7 @@ export default function FinanceiroPage() {
           descricao: movementForm.descricao.trim(),
           categoria_id: movementForm.categoria_id || null,
           valor: safeNumber(movementForm.valor),
+          moeda: currency,
           status: paid ? "pago" : "pendente",
           data_competencia: movementForm.data_competencia,
           data_vencimento: movementForm.data_vencimento || null,
@@ -1124,7 +1124,7 @@ export default function FinanceiroPage() {
 
       toast.success(
         isRevenue(data) ? "Receita recebida" : "Despesa paga",
-        `${formatMoney(data.valor)} liquidado com sucesso.`
+        `${formatMoney(data.valor, data.moeda)} liquidado com sucesso.`
       );
 
       setSettlementOpen(false);
@@ -1423,7 +1423,7 @@ export default function FinanceiroPage() {
       movement.oficina?.nome || "",
       movement.tecnico?.nome || "",
       movement.tipo === "receita" ? "Receita" : "Despesa",
-      formatMoney(movement.valor),
+      formatMoney(movement.valor, movement.moeda),
       isPaid(movement.status) ? (isRevenue(movement) ? "Recebido" : "Pago") : "Pendente",
       movement.data_vencimento ? formatDate(movement.data_vencimento) : "",
       movement.data_pagamento ? formatDate(movement.data_pagamento) : "",
@@ -1595,7 +1595,7 @@ export default function FinanceiroPage() {
             }`}
           >
             {isExpense(row) ? "- " : "+ "}
-            {formatMoney(value)}
+            {formatMoney(value, row.moeda)}
           </span>
         ),
       },
@@ -2207,7 +2207,7 @@ export default function FinanceiroPage() {
                       <span className="text-muted-foreground">
                         Valor:{" "}
                         <strong className="font-semibold text-foreground">
-                          {formatMoney(editingMovement.valor)}
+                          {formatMoney(editingMovement.valor, editingMovement.moeda)}
                         </strong>
                       </span>
                       <span className="text-muted-foreground">
@@ -2512,7 +2512,7 @@ export default function FinanceiroPage() {
         }
         description={
           settlementMovement
-            ? `${settlementMovement.descricao} · ${formatMoney(settlementMovement.valor)}`
+            ? `${settlementMovement.descricao} · ${formatMoney(settlementMovement.valor, settlementMovement.moeda)}`
             : undefined
         }
         size="md"

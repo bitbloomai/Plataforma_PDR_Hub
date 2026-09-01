@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
+import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { localISO, todayISO } from "@/lib/dates";
 import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
 import { formatDateByConfig } from "@/lib/formatters";
@@ -143,7 +144,7 @@ function nextBucketKey(key, mode) {
   return bucketKey(localISO(date), mode);
 }
 
-function buildTimeSeries(services, movements, from, to, config) {
+function buildTimeSeries(services, movements, from, to, config, convertValue = safeNumber) {
   const days = dateDiffInDays(from, to);
   const mode = days > 180 ? "month" : days > 45 ? "week" : "day";
   const map = new Map();
@@ -157,15 +158,15 @@ function buildTimeSeries(services, movements, from, to, config) {
   for (const service of services) {
     const key = bucketKey(service.data_servico, mode);
     const current = map.get(key) || { key, faturamento: 0, receita: 0, despesa: 0 };
-    current.faturamento += safeNumber(service.valor);
+    current.faturamento += convertValue(service.valor, service.moeda);
     map.set(key, current);
   }
 
   for (const movement of movements) {
     const key = bucketKey(movement.data_competencia, mode);
     const current = map.get(key) || { key, faturamento: 0, receita: 0, despesa: 0 };
-    if (isRevenue(movement)) current.receita += safeNumber(movement.valor);
-    if (isExpense(movement)) current.despesa += safeNumber(movement.valor);
+    if (isRevenue(movement)) current.receita += convertValue(movement.valor, movement.moeda);
+    if (isExpense(movement)) current.despesa += convertValue(movement.valor, movement.moeda);
     map.set(key, current);
   }
 
@@ -190,7 +191,7 @@ function serviceExportRows(services, formatMoney, config) {
       service.veiculo?.placa || "",
       vehicle,
       techs,
-      formatMoney(service.valor),
+      formatMoney(service.valor, service.moeda),
     ];
   });
 
@@ -328,6 +329,7 @@ async function loadDashboardRaw({ supabase, contaId, from, to, officeId, force =
           status,
           data_servico,
           valor,
+          moeda,
           descricao,
           created_at,
           oficina:oficinas(id,nome),
@@ -336,6 +338,7 @@ async function loadDashboardRaw({ supabase, contaId, from, to, officeId, force =
             tecnico_id,
             percentual,
             valor_repasse,
+            moeda,
             tecnico:tecnicos(id,nome)
           )
         `
@@ -365,6 +368,7 @@ async function loadDashboardRaw({ supabase, contaId, from, to, officeId, force =
           origem,
           descricao,
           valor,
+          moeda,
           status,
           data_competencia,
           data_vencimento,
@@ -766,21 +770,9 @@ export default function DashboardPage() {
   const timezone = me?.configuracao?.timezone || "Europe/Rome";
 
   const formatMoney = useCallback(
-    (value) => {
-      const currency = me?.configuracao?.moeda || "EUR";
-      const locale = me?.configuracao?.locale || "it-IT";
-
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency,
-          maximumFractionDigits: 2,
-        }).format(safeNumber(value));
-      } catch {
-        return `${currency} ${safeNumber(value).toFixed(2)}`;
-      }
-    },
-    [me]
+    (value, sourceCurrency) =>
+      formatDisplayMoney(value, withSourceCurrency(me?.configuracao, sourceCurrency || me?.configuracao?.moeda)),
+    [me?.configuracao]
   );
 
   const compactMoney = useCallback(
@@ -800,6 +792,11 @@ export default function DashboardPage() {
       }
     },
     [me]
+  );
+
+  const moneyValue = useCallback(
+    (value, sourceCurrency) => moneyFromStorage(value, withSourceCurrency(me?.configuracao, sourceCurrency), sourceCurrency),
+    [me?.configuracao]
   );
 
   const load = useCallback(
@@ -887,20 +884,20 @@ export default function DashboardPage() {
     );
 
     const billableServices = services.filter((service) => !isCancelledService(service));
-    const faturamento = sumBy(billableServices, (service) => service.valor);
-    const recebido = sumBy(revenues.filter((movement) => isPaid(movement.status)), (m) => m.valor);
-    const aReceber = sumBy(revenues.filter((movement) => !isPaid(movement.status)), (m) => m.valor);
-    const despesas = sumBy(expenses, (movement) => movement.valor);
-    const despesasPagas = sumBy(expenses.filter((movement) => isPaid(movement.status)), (m) => m.valor);
-    const despesasPendentes = sumBy(expenses.filter((movement) => !isPaid(movement.status)), (m) => m.valor);
-    const receitas = sumBy(revenues, (movement) => movement.valor);
+    const faturamento = sumBy(billableServices, (service) => moneyValue(service.valor, service.moeda));
+    const recebido = sumBy(revenues.filter((movement) => isPaid(movement.status)), (m) => moneyValue(m.valor, m.moeda));
+    const aReceber = sumBy(revenues.filter((movement) => !isPaid(movement.status)), (m) => moneyValue(m.valor, m.moeda));
+    const despesas = sumBy(expenses, (movement) => moneyValue(movement.valor, movement.moeda));
+    const despesasPagas = sumBy(expenses.filter((movement) => isPaid(movement.status)), (m) => moneyValue(m.valor, m.moeda));
+    const despesasPendentes = sumBy(expenses.filter((movement) => !isPaid(movement.status)), (m) => moneyValue(m.valor, m.moeda));
+    const receitas = sumBy(revenues, (movement) => moneyValue(movement.valor, movement.moeda));
     const repassesPagos = sumBy(
       techTransfers.filter((movement) => isPaid(movement.status)),
-      (movement) => movement.valor
+      (movement) => moneyValue(movement.valor, movement.moeda)
     );
     const repassesPendentes = sumBy(
       techTransfers.filter((movement) => !isPaid(movement.status)),
-      (movement) => movement.valor
+      (movement) => moneyValue(movement.valor, movement.moeda)
     );
 
     return {
@@ -920,11 +917,11 @@ export default function DashboardPage() {
       oficinasAtendidas: new Set(billableServices.map((service) => service.oficina_id)).size,
       tecnicosAtivos: technicianId ? 1 : technicians.length,
     };
-  }, [movements, services, technicianId, technicians.length]);
+  }, [moneyValue, movements, services, technicianId, technicians.length]);
 
   const timeSeries = useMemo(
-    () => buildTimeSeries(services, movements, from, to, me?.configuracao),
-    [from, me?.configuracao, movements, services, to]
+    () => buildTimeSeries(services, movements, from, to, me?.configuracao, moneyValue),
+    [from, me?.configuracao, moneyValue, movements, services, to]
   );
 
   const officeRanking = useMemo(() => {
@@ -938,13 +935,13 @@ export default function DashboardPage() {
         value: 0,
         count: 0,
       };
-      current.value += safeNumber(service.valor);
+      current.value += moneyValue(service.valor, service.moeda);
       current.count += 1;
       map.set(id, current);
     });
 
     return [...map.values()].sort((a, b) => b.value - a.value);
-  }, [services]);
+  }, [moneyValue, services]);
 
   const technicianRanking = useMemo(() => {
     const map = new Map();
@@ -958,14 +955,14 @@ export default function DashboardPage() {
           value: 0,
           count: 0,
         };
-        current.value += safeNumber(link.valor_repasse);
+        current.value += moneyValue(link.valor_repasse, link.moeda || service.moeda);
         current.count += 1;
         map.set(link.tecnico_id, current);
       });
     });
 
     return [...map.values()].sort((a, b) => b.value - a.value);
-  }, [services, technicianId]);
+  }, [moneyValue, services, technicianId]);
 
   const upcomingReceivables = useMemo(() => {
     return movements
@@ -1437,7 +1434,7 @@ export default function DashboardPage() {
                           {techs || "—"}
                         </td>
                         <td className="whitespace-nowrap px-5 py-3.5 text-right font-semibold text-foreground">
-                          {formatMoney(service.valor)}
+                          {formatMoney(service.valor, service.moeda)}
                         </td>
                       </tr>
                     );
@@ -1478,7 +1475,7 @@ export default function DashboardPage() {
                       </p>
                     </div>
                     <p className="shrink-0 text-sm font-semibold text-foreground">
-                      {formatMoney(movement.valor)}
+                      {formatMoney(movement.valor, movement.moeda)}
                     </p>
                   </div>
                 </div>

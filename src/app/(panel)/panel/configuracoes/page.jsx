@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw, Save } from "lucide-react";
@@ -76,29 +76,61 @@ function normalizeForm(data, defaults) {
  * MOEDAS
  */
 const CURRENCY_OPTIONS = [
-  { value: "EUR", label: "EUR - Euro" },
-  { value: "BRL", label: "BRL - Real" },
-  { value: "USD", label: "USD - Dolar" },
+  { value: "EUR", label: "\u20AC EUR - Euro" },
+  { value: "BRL", label: "R$ BRL - Real brasileiro" },
+  { value: "USD", label: "$ USD - Dolar americano" },
+  { value: "ARS", label: "$ ARS - Peso argentino" },
+  { value: "CAD", label: "$ CAD - Dolar canadense" },
+  { value: "MXN", label: "$ MXN - Peso mexicano" },
+  { value: "CHF", label: "CHF - Franco suico" },
+  { value: "GBP", label: "\u00A3 GBP - Libra esterlina" },
+  { value: "AUD", label: "$ AUD - Dolar australiano" },
+  { value: "JPY", label: "\u00A5 JPY - Iene japones" },
+  { value: "CLP", label: "$ CLP - Peso chileno" },
 ];
 
 /**
  * LOCALE
  */
 const LOCALE_OPTIONS = [
-  { value: "it-IT", label: "Italiano (Italia)" },
-  { value: "pt-BR", label: "Português (Brasil)" },
-  { value: "en-US", label: "English (Estados Unidos)" },
+  { value: "it-IT", label: "\uD83C\uDDEE\uD83C\uDDF9 Italia - Italiano", timezone: "Europe/Rome", dateFormat: "DD/MM/YYYY" },
+  { value: "pt-BR", label: "\uD83C\uDDE7\uD83C\uDDF7 Brasil - Portugues", timezone: "America/Sao_Paulo", dateFormat: "DD/MM/YYYY" },
+  { value: "en-US", label: "\uD83C\uDDFA\uD83C\uDDF8 English (Estados Unidos)", timezone: "America/Chicago", dateFormat: "MM/DD/YYYY" },
+  { value: "es-AR", label: "\uD83C\uDDE6\uD83C\uDDF7 Argentina - Espanol", timezone: "America/Argentina/Buenos_Aires", dateFormat: "DD/MM/YYYY" },
+  { value: "en-CA", label: "\uD83C\uDDE8\uD83C\uDDE6 Canada - English", timezone: "America/Toronto", dateFormat: "YYYY-MM-DD" },
+  { value: "fr-CA", label: "\uD83C\uDDE8\uD83C\uDDE6 Canada - Francais", timezone: "America/Toronto", dateFormat: "YYYY-MM-DD" },
+  { value: "de-DE", label: "\uD83C\uDDE9\uD83C\uDDEA Alemanha - Deutsch", timezone: "Europe/Berlin", dateFormat: "DD/MM/YYYY" },
+  { value: "fr-FR", label: "\uD83C\uDDEB\uD83C\uDDF7 Franca - Francais", timezone: "Europe/Paris", dateFormat: "DD/MM/YYYY" },
+  { value: "es-ES", label: "\uD83C\uDDEA\uD83C\uDDF8 Espanha - Espanol", timezone: "Europe/Madrid", dateFormat: "DD/MM/YYYY" },
+  { value: "en-GB", label: "\uD83C\uDDEC\uD83C\uDDE7 Reino Unido - English", timezone: "Europe/London", dateFormat: "DD/MM/YYYY" },
+  { value: "es-MX", label: "\uD83C\uDDF2\uD83C\uDDFD Mexico - Espanol", timezone: "America/Mexico_City", dateFormat: "DD/MM/YYYY" },
+  { value: "de-CH", label: "\uD83C\uDDE8\uD83C\uDDED Suica - Deutsch", timezone: "Europe/Zurich", dateFormat: "DD/MM/YYYY" },
+  { value: "en-AU", label: "\uD83C\uDDE6\uD83C\uDDFA Australia - English", timezone: "Australia/Sydney", dateFormat: "DD/MM/YYYY" },
+  { value: "es-CL", label: "\uD83C\uDDE8\uD83C\uDDF1 Chile - Espanol", timezone: "America/Santiago", dateFormat: "DD/MM/YYYY" },
 ];
 
 /**
  * TIMEZONE
  */
 const TIMEZONE_OPTIONS = [
-  { value: "Europe/Rome", label: "Europe/Rome - Itália" },
+  { value: "Europe/Rome", label: "Europe/Rome - Italia" },
   {
     value: "America/Sao_Paulo",
     label: "America/Sao_Paulo - Brasil",
   },
+  { value: "America/Chicago", label: "America/Chicago - Estados Unidos" },
+  { value: "America/New_York", label: "America/New_York - Estados Unidos" },
+  { value: "America/Denver", label: "America/Denver - Estados Unidos" },
+  { value: "America/Argentina/Buenos_Aires", label: "America/Argentina/Buenos_Aires - Argentina" },
+  { value: "America/Toronto", label: "America/Toronto - Canada" },
+  { value: "America/Mexico_City", label: "America/Mexico_City - Mexico" },
+  { value: "America/Santiago", label: "America/Santiago - Chile" },
+  { value: "Europe/Berlin", label: "Europe/Berlin - Alemanha" },
+  { value: "Europe/Paris", label: "Europe/Paris - Franca" },
+  { value: "Europe/Madrid", label: "Europe/Madrid - Espanha" },
+  { value: "Europe/London", label: "Europe/London - Reino Unido" },
+  { value: "Europe/Zurich", label: "Europe/Zurich - Suica" },
+  { value: "Australia/Sydney", label: "Australia/Sydney - Australia" },
   { value: "UTC", label: "UTC" },
 ];
 
@@ -238,6 +270,25 @@ function getRegionOptions(country) {
     ...ITALY_REGION_OPTIONS,
     ...BRAZIL_STATE_OPTIONS,
   ];
+}
+
+function getLocaleDefaults(locale) {
+  const option = LOCALE_OPTIONS.find((item) => item.value === locale);
+  if (option?.timezone) return option;
+
+  if (locale === "pt-BR") {
+    return { timezone: "America/Sao_Paulo", dateFormat: "DD/MM/YYYY" };
+  }
+
+  if (locale === "it-IT") {
+    return { timezone: "Europe/Rome", dateFormat: "DD/MM/YYYY" };
+  }
+
+  if (locale === "en-US") {
+    return { timezone: "America/Chicago", dateFormat: "MM/DD/YYYY" };
+  }
+
+  return { timezone: "Europe/Rome", dateFormat: "DD/MM/YYYY" };
 }
 
 export default function ConfiguracoesPage() {
@@ -719,12 +770,17 @@ export default function ConfiguracoesPage() {
               <FormField label="Locale">
                 <Select
                   value={configForm.locale}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const locale = event.target.value;
+                    const defaults = getLocaleDefaults(locale);
+
                     setConfigForm((current) => ({
                       ...current,
-                      locale: event.target.value,
-                    }))
-                  }
+                      locale,
+                      timezone: defaults.timezone,
+                      formato_data: defaults.dateFormat,
+                    }));
+                  }}
                   options={LOCALE_OPTIONS}
                 />
               </FormField>
