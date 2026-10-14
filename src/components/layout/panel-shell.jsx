@@ -59,7 +59,9 @@ export function PanelShell({ children }) {
   }
 
   return (
-    <div className="flex h-[var(--panel-viewport-height,100svh)] overflow-hidden bg-background text-foreground">
+    // fixed inset-0: o shell ocupa exatamente a viewport e fica fora do fluxo do documento,
+    // então a janela nunca rola — apenas o <main> possui barra de rolagem.
+    <div className="fixed inset-0 flex overflow-hidden bg-background text-foreground">
       <Sidebar collapsed={collapsed} onToggle={toggleSidebar} />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

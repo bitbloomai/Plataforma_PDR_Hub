@@ -1636,7 +1636,7 @@ export default function FinanceiroPage() {
                 aria-label={isRevenue(row) ? "Marcar como recebido" : "Marcar como pago"}
                 title={isRevenue(row) ? "Marcar como recebido" : "Marcar como pago"}
               >
-                <CheckCircle2 className="size-4" strokeWidth={1.8} />
+                <CheckCircle2 className="size-4 text-success" strokeWidth={1.8} />
               </Button>
             ) : (
               <Button

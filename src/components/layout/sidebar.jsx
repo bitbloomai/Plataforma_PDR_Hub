@@ -76,7 +76,7 @@ export function Sidebar({ collapsed, onToggle }) {
   return (
     <>
       <aside
-        className={`relative hidden h-[var(--panel-viewport-height,100svh)] shrink-0 border-r border-border bg-surface transition-[width] duration-300 md:flex md:flex-col ${
+        className={`relative hidden h-full shrink-0 border-r border-border bg-surface transition-[width] duration-300 md:flex md:flex-col ${
           collapsed ? "w-[76px]" : "w-[252px]"
         }`}
       >
