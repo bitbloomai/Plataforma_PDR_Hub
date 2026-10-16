@@ -6,9 +6,13 @@ export function AuthLayoutShell({
   const hasAside = Boolean(aside);
 
   return (
+    // fixed inset-0: a tela de auth ocupa exatamente a viewport e a janela
+    // nunca rola. Em telas muito baixas, só a coluna do formulário rola (sem barra).
     <main
       className={`
-        min-h-screen
+        fixed
+        inset-0
+        overflow-hidden
         bg-background
         text-foreground
         ${className}
@@ -16,7 +20,7 @@ export function AuthLayoutShell({
     >
       <div
         className={`
-          min-h-screen
+          h-full
           ${
             hasAside
               ? "grid grid-cols-1 lg:grid-cols-[minmax(0,1.05fr)_minmax(520px,0.95fr)]"
@@ -30,17 +34,8 @@ export function AuthLayoutShell({
         <section
           className={`
             relative
-            flex
-            min-h-screen
-            items-center
-            justify-center
+            h-full
             overflow-hidden
-            px-5
-            py-8
-            sm:px-8
-            sm:py-10
-            lg:px-12
-            xl:px-16
 
             ${hasAside ? "" : "w-full"}
           `}
@@ -92,16 +87,36 @@ export function AuthLayoutShell({
             "
           />
 
-          {/* Conteúdo da página */}
+          {/* Conteúdo da página: m-auto centraliza sem cortar o topo quando falta altura */}
           <div
             className="
-              relative
+              no-scrollbar
+              absolute
+              inset-0
               z-10
-              w-full
-              max-w-[460px]
+              flex
+              flex-col
+              overflow-y-auto
+              overscroll-contain
+              px-5
+              py-8
+              sm:px-8
+              sm:py-10
+              lg:px-12
+              xl:px-16
+              [@media(max-height:760px)]:py-4
             "
           >
-            {children}
+            <div
+              className="
+                relative
+                m-auto
+                w-full
+                max-w-[460px]
+              "
+            >
+              {children}
+            </div>
           </div>
         </section>
 
@@ -114,7 +129,7 @@ export function AuthLayoutShell({
             className="
               relative
               hidden
-              min-h-screen
+              h-full
               overflow-hidden
               bg-[#171715]
               lg:block
@@ -251,7 +266,7 @@ export function AuthLayoutShell({
               "
             />
 
-            <div className="relative z-10 min-h-screen">
+            <div className="relative z-10 h-full">
               {aside}
             </div>
           </aside>

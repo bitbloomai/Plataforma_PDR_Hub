@@ -1,10 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Camera, RefreshCw, Save, Trash2, UploadCloud, UserRound } from "lucide-react";
+import { Camera, Crop, RefreshCw, Save, Trash2, UploadCloud, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button, Form, FormField, FormGrid, Input } from "@/components/shared";
+import {
+  Button,
+  Form,
+  FormField,
+  FormGrid,
+  ImageCropModal,
+  Input,
+  MAX_CROP_SOURCE_SIZE,
+} from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
 import { formatDateTimeByConfig } from "@/lib/formatters";
 
@@ -75,6 +83,9 @@ export default function PerfilPage() {
   const [avatarFile, setAvatarFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [removeAvatar, setRemoveAvatar] = useState(false);
+  const [cropSource, setCropSource] = useState(null);
+  const [cropOpen, setCropOpen] = useState(false);
+  const [cropKey, setCropKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -107,6 +118,7 @@ export default function PerfilPage() {
       setAvatarFile(null);
       setRemoveAvatar(false);
       setPreviewUrl(null);
+      setCropSource(null);
     } catch (error) {
       console.error("Perfil loadData", error);
       toast.error(error.message || "Nao foi possivel carregar o perfil.");
@@ -130,24 +142,39 @@ export default function PerfilPage() {
 
   function handleFileChange(event) {
     const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
 
     if (!ALLOWED_AVATAR_TYPES.includes(file.type)) {
       toast.error("Envie uma imagem JPG, PNG ou WebP.");
-      event.target.value = "";
       return;
     }
 
-    if (file.size > MAX_AVATAR_SIZE) {
-      toast.error("A imagem deve ter ate 5 MB.");
-      event.target.value = "";
+    if (file.size > MAX_CROP_SOURCE_SIZE) {
+      toast.error("A imagem deve ter ate 15 MB.");
+      return;
+    }
+
+    openCrop(file);
+  }
+
+  function openCrop(file) {
+    setCropSource(file);
+    setCropKey((current) => current + 1);
+    setCropOpen(true);
+  }
+
+  function handleCropConfirm(croppedFile) {
+    if (croppedFile.size > MAX_AVATAR_SIZE) {
+      toast.error("A imagem recortada ficou maior que 5 MB.");
       return;
     }
 
     if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setAvatarFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
+    setAvatarFile(croppedFile);
+    setPreviewUrl(URL.createObjectURL(croppedFile));
     setRemoveAvatar(false);
+    setCropOpen(false);
   }
 
   async function uploadAvatar(file) {
@@ -294,6 +321,11 @@ export default function PerfilPage() {
                   onChange={handleFileChange}
                 />
               </label>
+              {avatarFile && cropSource ? (
+                <Button variant="outline" leftIcon={Crop} onClick={() => openCrop(cropSource)}>
+                  Ajustar
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 leftIcon={Trash2}
@@ -301,6 +333,7 @@ export default function PerfilPage() {
                   if (previewUrl) URL.revokeObjectURL(previewUrl);
                   setAvatarFile(null);
                   setPreviewUrl(null);
+                  setCropSource(null);
                   setRemoveAvatar(true);
                 }}
                 disabled={!displayedAvatar}
@@ -310,7 +343,7 @@ export default function PerfilPage() {
             </div>
 
             <p className="mt-4 text-xs text-muted-foreground">
-              JPG, PNG ou WebP de ate 5 MB.
+              JPG, PNG ou WebP de ate 15 MB. Voce ajusta o enquadramento antes de salvar.
             </p>
           </div>
         </section>
@@ -357,6 +390,15 @@ export default function PerfilPage() {
           </div>
         </section>
       </Form>
+
+      <ImageCropModal
+        key={cropKey}
+        open={cropOpen}
+        file={cropSource}
+        title="Ajustar foto de perfil"
+        onClose={() => setCropOpen(false)}
+        onConfirm={handleCropConfirm}
+      />
     </main>
   );
 }

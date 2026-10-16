@@ -112,4 +112,21 @@ const columns = [
 ];
 ```
 
+## ImageCropModal
+
+Recorte de imagem antes do upload (avatar, logo). Arrastar, zoom (slider, roda do mouse ou `+`/`-`), girar 90° e saída quadrada (`outputSize`, padrão 512px, JPEG).
+
+```jsx
+<ImageCropModal
+  key={cropKey}            // nova key a cada arquivo
+  open={cropOpen}
+  file={sourceFile}
+  shape="circle"           // ou "square"
+  onClose={() => setCropOpen(false)}
+  onConfirm={(croppedFile) => setAvatarFile(croppedFile)}
+/>
+```
+
+Use `MAX_CROP_SOURCE_SIZE` (15 MB) para validar o arquivo original.
+
 Veja `Example.jsx` para um exemplo de uso integrado.

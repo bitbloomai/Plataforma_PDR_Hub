@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ImagePlus, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { Crop, ImagePlus, Pencil, Plus, Trash2, Upload } from "lucide-react";
 
 import {
   Button,
@@ -9,7 +9,9 @@ import {
   FormField,
   FormGrid,
   FormSection,
+  ImageCropModal,
   Input,
+  MAX_CROP_SOURCE_SIZE,
   Modal,
   Select,
   Switch,
@@ -87,6 +89,9 @@ export function TechnicianFormModal({ open, technician, me, supabase, onClose, o
   const [saving, setSaving] = useState(false);
   const [avatarFile, setAvatarFile] = useState(null);
   const [removeAvatar, setRemoveAvatar] = useState(false);
+  const [cropSource, setCropSource] = useState(null);
+  const [cropOpen, setCropOpen] = useState(false);
+  const [cropKey, setCropKey] = useState(0);
 
   const avatarPreviewUrl = useMemo(() => {
     if (avatarFile) return URL.createObjectURL(avatarFile);
@@ -103,7 +108,8 @@ export function TechnicianFormModal({ open, technician, me, supabase, onClose, o
   }, [avatarFile, avatarPreviewUrl]);
 
   function close() {
-    if (saving) return;
+    // Enquanto o recorte está aberto, o Esc pertence ao modal de recorte.
+    if (saving || cropOpen) return;
     onClose?.();
   }
 
@@ -150,23 +156,33 @@ export function TechnicianFormModal({ open, technician, me, supabase, onClose, o
 
   function handleAvatarPick(event) {
     const file = event.target.files?.[0];
+    event.target.value = "";
     if (!file) return;
 
     if (!ALLOWED_AVATAR_TYPES.includes(file.type)) {
       toast.warning("Formato não suportado", "Use uma imagem JPG, PNG ou WebP.");
-      event.target.value = "";
       return;
     }
 
-    if (file.size > MAX_AVATAR_SIZE) {
-      toast.warning("Imagem muito grande", "O avatar pode ter no máximo 5 MB.");
-      event.target.value = "";
+    if (file.size > MAX_CROP_SOURCE_SIZE) {
+      toast.warning("Imagem muito grande", "Escolha uma imagem de até 15 MB.");
       return;
     }
 
-    setAvatarFile(file);
+    openCrop(file);
+  }
+
+  function openCrop(file) {
+    setCropSource(file);
+    setCropKey((current) => current + 1);
+    setCropOpen(true);
+  }
+
+  function handleCropConfirm(croppedFile) {
+    setAvatarFile(croppedFile);
     setRemoveAvatar(false);
     setFormErrors((current) => ({ ...current, foto: undefined }));
+    setCropOpen(false);
   }
 
   async function uploadAvatar(file, currentContaId, technicianId) {
@@ -352,421 +368,444 @@ export function TechnicianFormModal({ open, technician, me, supabase, onClose, o
   }
 
   return (
-    <Modal
-      open={open}
-      onClose={close}
-      title={technician ? "Editar técnico" : "Novo técnico"}
-      description="Dados pessoais, contato e informações de pagamento do profissional."
-      size="xl"
-      footer={
-        <>
-          <Button variant="secondary" onClick={close} disabled={saving}>
-            Cancelar
-          </Button>
-          <Button
-            type="submit"
-            form="technician-form"
-            loading={saving}
-            leftIcon={technician ? Pencil : Plus}
+    <>
+      <Modal
+        open={open}
+        onClose={close}
+        title={technician ? "Editar técnico" : "Novo técnico"}
+        description="Dados pessoais, contato e informações de pagamento do profissional."
+        size="xl"
+        footer={
+          <>
+            <Button variant="secondary" onClick={close} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              form="technician-form"
+              loading={saving}
+              leftIcon={technician ? Pencil : Plus}
+            >
+              {technician ? "Salvar alterações" : "Criar técnico"}
+            </Button>
+          </>
+        }
+      >
+        <Form id="technician-form" onSubmit={handleSave}>
+          <FormSection
+            title="Foto do técnico"
+            description="JPG, PNG ou WebP de até 15 MB. Antes de salvar você ajusta o enquadramento da foto."
           >
-            {technician ? "Salvar alterações" : "Criar técnico"}
-          </Button>
-        </>
-      }
-    >
-      <Form id="technician-form" onSubmit={handleSave}>
-        <FormSection
-          title="Foto do técnico"
-          description="A imagem é armazenada no bucket público de perfis. JPG, PNG ou WebP de até 5 MB."
-        >
-          <div className="flex flex-col gap-4 rounded-xl border border-border bg-background p-4 sm:flex-row sm:items-center">
-            <Avatar
-              technician={{ nome: form.nome || "Técnico" }}
-              photoUrl={avatarPreviewUrl}
-              size="lg"
-            />
-
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">
-                {avatarFile
-                  ? avatarFile.name
-                  : technician?.foto_url && !removeAvatar
-                    ? "Foto atual do cadastro"
-                    : "Nenhuma foto selecionada"}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Ao trocar a foto, um novo nome de arquivo é gerado para evitar cache da imagem anterior.
-              </p>
-              {formErrors.foto ? (
-                <p className="mt-2 text-xs font-medium text-danger">{formErrors.foto}</p>
-              ) : null}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="hidden"
-                onChange={handleAvatarPick}
+            <div className="flex flex-col gap-4 rounded-xl border border-border bg-background p-4 sm:flex-row sm:items-center">
+              <Avatar
+                technician={{ nome: form.nome || "Técnico" }}
+                photoUrl={avatarPreviewUrl}
+                size="lg"
               />
-              <Button
-                type="button"
-                variant="outline"
-                leftIcon={avatarPreviewUrl ? Upload : ImagePlus}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {avatarPreviewUrl ? "Trocar foto" : "Escolher foto"}
-              </Button>
 
-              {avatarPreviewUrl ? (
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground">
+                  {avatarFile
+                    ? "Nova foto recortada"
+                    : technician?.foto_url && !removeAvatar
+                      ? "Foto atual do cadastro"
+                      : "Nenhuma foto selecionada"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  A foto é recortada em formato quadrado e exibida em círculo nos cards e no perfil.
+                </p>
+                {formErrors.foto ? (
+                  <p className="mt-2 text-xs font-medium text-danger">{formErrors.foto}</p>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleAvatarPick}
+                />
                 <Button
                   type="button"
-                  variant="ghost"
-                  leftIcon={Trash2}
-                  onClick={() => {
-                    setAvatarFile(null);
-                    setRemoveAvatar(true);
-                    if (fileInputRef.current) fileInputRef.current.value = "";
-                  }}
+                  variant="outline"
+                  leftIcon={avatarPreviewUrl ? Upload : ImagePlus}
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  Remover
+                  {avatarPreviewUrl ? "Trocar foto" : "Escolher foto"}
                 </Button>
-              ) : null}
+
+                {avatarFile && cropSource ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    leftIcon={Crop}
+                    onClick={() => openCrop(cropSource)}
+                  >
+                    Ajustar
+                  </Button>
+                ) : null}
+
+                {avatarPreviewUrl ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    leftIcon={Trash2}
+                    onClick={() => {
+                      setAvatarFile(null);
+                      setCropSource(null);
+                      setRemoveAvatar(true);
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                  >
+                    Remover
+                  </Button>
+                ) : null}
+              </div>
             </div>
-          </div>
-        </FormSection>
+          </FormSection>
 
-        <FormSection
-          title="Dados principais"
-          description="Identificação e contato do profissional."
-        >
-          <FormGrid>
-            <FormField label="Nome" required error={formErrors.nome}>
-              <Input
-                value={form.nome}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, nome: event.target.value }))
-                }
-                placeholder="Ex.: Mateus Silva"
-              />
-            </FormField>
+          <FormSection
+            title="Dados principais"
+            description="Identificação e contato do profissional."
+          >
+            <FormGrid>
+              <FormField label="Nome" required error={formErrors.nome}>
+                <Input
+                  value={form.nome}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, nome: event.target.value }))
+                  }
+                  placeholder="Ex.: Mateus Silva"
+                />
+              </FormField>
 
-            <FormField label="Nacionalidade">
-              <Select
-                value={form.nacionalidade}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    nacionalidade: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Não informada</option>
-                <option value="BR">🇧🇷 Brasileira</option>
-                <option value="IT">🇮🇹 Italiana</option>
-              </Select>
-            </FormField>
-
-            <FormField label="E-mail" error={formErrors.email}>
-              <Input
-                type="email"
-                value={form.email}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, email: event.target.value }))
-                }
-                placeholder="tecnico@email.com"
-              />
-            </FormField>
-
-            <FormField label="Telefone">
-              <div className="flex gap-2">
+              <FormField label="Nacionalidade">
                 <Select
-                  value={form.telefone_pais}
+                  value={form.nacionalidade}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      nacionalidade: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">Não informada</option>
+                  <option value="BR">🇧🇷 Brasileira</option>
+                  <option value="IT">🇮🇹 Italiana</option>
+                </Select>
+              </FormField>
+
+              <FormField label="E-mail" error={formErrors.email}>
+                <Input
+                  type="email"
+                  value={form.email}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, email: event.target.value }))
+                  }
+                  placeholder="tecnico@email.com"
+                />
+              </FormField>
+
+              <FormField label="Telefone">
+                <div className="flex gap-2">
+                  <Select
+                    value={form.telefone_pais}
+                    onChange={(event) => {
+                      const nextCountry = event.target.value;
+                      setForm((current) => ({
+                        ...current,
+                        telefone_pais: nextCountry,
+                        telefone: maskPhone(
+                          String(current.telefone || "").replace(/\D/g, ""),
+                          nextCountry
+                        ),
+                      }));
+                    }}
+                    className="w-32 shrink-0"
+                    aria-label="País do telefone"
+                  >
+                    <option value="BR">🇧🇷 +55</option>
+                    <option value="IT">🇮🇹 +39</option>
+                  </Select>
+                  <Input
+                    type="tel"
+                    value={form.telefone}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        telefone: maskPhone(event.target.value, current.telefone_pais),
+                      }))
+                    }
+                    placeholder={form.telefone_pais === "BR" ? "(31) 99999-9999" : "333 123 4567"}
+                  />
+                </div>
+              </FormField>
+            </FormGrid>
+          </FormSection>
+
+          <FormSection
+            title="Documento"
+            description="O documento é formatado conforme o país selecionado e salvo sem máscara."
+          >
+            <FormGrid>
+              <FormField label="País do documento">
+                <Select
+                  value={form.documento_pais}
                   onChange={(event) => {
                     const nextCountry = event.target.value;
                     setForm((current) => ({
                       ...current,
-                      telefone_pais: nextCountry,
-                      telefone: maskPhone(
-                        String(current.telefone || "").replace(/\D/g, ""),
-                        nextCountry
-                      ),
+                      documento_pais: nextCountry,
+                      documento: "",
                     }));
                   }}
-                  className="w-32 shrink-0"
-                  aria-label="País do telefone"
                 >
-                  <option value="BR">🇧🇷 +55</option>
-                  <option value="IT">🇮🇹 +39</option>
+                  <option value="BR">🇧🇷 Brasil · CPF</option>
+                  <option value="IT">🇮🇹 Itália · Codice Fiscale</option>
                 </Select>
+              </FormField>
+
+              <FormField label={countryMeta(form.documento_pais, "BR").documentLabel}>
                 <Input
-                  type="tel"
-                  value={form.telefone}
+                  value={form.documento}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      telefone: maskPhone(event.target.value, current.telefone_pais),
+                      documento: maskPersonDocument(event.target.value, current.documento_pais),
                     }))
                   }
-                  placeholder={form.telefone_pais === "BR" ? "(31) 99999-9999" : "333 123 4567"}
+                  placeholder={form.documento_pais === "BR" ? "000.000.000-00" : "RSSMRA85T10A562S"}
                 />
-              </div>
-            </FormField>
-          </FormGrid>
-        </FormSection>
+              </FormField>
+            </FormGrid>
+          </FormSection>
 
-        <FormSection
-          title="Documento"
-          description="O documento é formatado conforme o país selecionado e salvo sem máscara."
-        >
-          <FormGrid>
-            <FormField label="País do documento">
-              <Select
-                value={form.documento_pais}
-                onChange={(event) => {
-                  const nextCountry = event.target.value;
-                  setForm((current) => ({
-                    ...current,
-                    documento_pais: nextCountry,
-                    documento: "",
-                  }));
-                }}
-              >
-                <option value="BR">🇧🇷 Brasil · CPF</option>
-                <option value="IT">🇮🇹 Itália · Codice Fiscale</option>
-              </Select>
-            </FormField>
-
-            <FormField label={countryMeta(form.documento_pais, "BR").documentLabel}>
-              <Input
-                value={form.documento}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    documento: maskPersonDocument(event.target.value, current.documento_pais),
-                  }))
-                }
-                placeholder={form.documento_pais === "BR" ? "000.000.000-00" : "RSSMRA85T10A562S"}
-              />
-            </FormField>
-          </FormGrid>
-        </FormSection>
-
-        <FormSection
-          title="Pagamento"
-          description="Escolha a forma principal para repasses. Os campos são internos e não aparecem nos cards."
-        >
-          <FormGrid>
-            <FormField label="Forma principal de pagamento">
-              <Select
-                value={form.pagamento_tipo}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    pagamento_tipo: event.target.value,
-                  }))
-                }
-              >
-                <option value="">Não informada</option>
-                <option value="pix">PIX</option>
-                <option value="conta_br">Conta bancária brasileira</option>
-                <option value="iban">IBAN / SEPA / conta internacional</option>
-                <option value="outro">Outro</option>
-              </Select>
-            </FormField>
-
-            {form.pagamento_tipo ? (
-              <FormField label="País da conta">
+          <FormSection
+            title="Pagamento"
+            description="Escolha a forma principal para repasses. Os campos são internos e não aparecem nos cards."
+          >
+            <FormGrid>
+              <FormField label="Forma principal de pagamento">
                 <Select
-                  value={form.banco_pais}
+                  value={form.pagamento_tipo}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      banco_pais: event.target.value,
+                      pagamento_tipo: event.target.value,
                     }))
                   }
                 >
-                  <option value="BR">🇧🇷 Brasil</option>
-                  <option value="IT">🇮🇹 Itália</option>
-                  <option value="OUTRO">🌍 Outro / global</option>
+                  <option value="">Não informada</option>
+                  <option value="pix">PIX</option>
+                  <option value="conta_br">Conta bancária brasileira</option>
+                  <option value="iban">IBAN / SEPA / conta internacional</option>
+                  <option value="outro">Outro</option>
                 </Select>
               </FormField>
-            ) : null}
+
+              {form.pagamento_tipo ? (
+                <FormField label="País da conta">
+                  <Select
+                    value={form.banco_pais}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        banco_pais: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="BR">🇧🇷 Brasil</option>
+                    <option value="IT">🇮🇹 Itália</option>
+                    <option value="OUTRO">🌍 Outro / global</option>
+                  </Select>
+                </FormField>
+              ) : null}
+
+              {form.pagamento_tipo ? (
+                <FormField label="Titular da conta">
+                  <Input
+                    value={form.titular_pagamento}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        titular_pagamento: event.target.value,
+                      }))
+                    }
+                    placeholder="Nome do titular"
+                  />
+                </FormField>
+              ) : null}
+
+              {form.pagamento_tipo === "pix" ? (
+                <FormField label="Chave PIX" required error={formErrors.chave_pix}>
+                  <Input
+                    value={form.chave_pix}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        chave_pix: event.target.value,
+                      }))
+                    }
+                    placeholder="CPF, telefone, e-mail ou chave aleatória"
+                  />
+                </FormField>
+              ) : null}
+
+              {form.pagamento_tipo === "conta_br" ? (
+                <>
+                  <FormField label="Banco" required error={formErrors.banco_nome}>
+                    <Input
+                      value={form.banco_nome}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          banco_nome: event.target.value,
+                        }))
+                      }
+                      placeholder="Ex.: Sicoob"
+                    />
+                  </FormField>
+
+                  <FormField label="Agência" required error={formErrors.agencia}>
+                    <Input
+                      value={form.agencia}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          agencia: event.target.value,
+                        }))
+                      }
+                      placeholder="0001"
+                    />
+                  </FormField>
+
+                  <FormField label="Conta" required error={formErrors.conta_bancaria}>
+                    <Input
+                      value={form.conta_bancaria}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          conta_bancaria: event.target.value,
+                        }))
+                      }
+                      placeholder="12345-6"
+                    />
+                  </FormField>
+                </>
+              ) : null}
+
+              {form.pagamento_tipo === "iban" ? (
+                <>
+                  <FormField label="Banco / instituição">
+                    <Input
+                      value={form.banco_nome}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          banco_nome: event.target.value,
+                        }))
+                      }
+                      placeholder="Ex.: Intesa Sanpaolo / Wise"
+                    />
+                  </FormField>
+
+                  <FormField label="IBAN" required error={formErrors.iban}>
+                    <Input
+                      value={form.iban}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          iban: event.target.value.toUpperCase(),
+                        }))
+                      }
+                      placeholder="IT60X0542811101000000123456"
+                    />
+                  </FormField>
+
+                  <FormField label="BIC / SWIFT">
+                    <Input
+                      value={form.bic_swift}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          bic_swift: event.target.value.toUpperCase(),
+                        }))
+                      }
+                      placeholder="BCITITMM"
+                    />
+                  </FormField>
+                </>
+              ) : null}
+            </FormGrid>
 
             {form.pagamento_tipo ? (
-              <FormField label="Titular da conta">
-                <Input
-                  value={form.titular_pagamento}
+              <FormField label="Informações adicionais de pagamento">
+                <Textarea
+                  value={form.dados_pagamento}
                   onChange={(event) =>
                     setForm((current) => ({
                       ...current,
-                      titular_pagamento: event.target.value,
+                      dados_pagamento: event.target.value,
                     }))
                   }
-                  placeholder="Nome do titular"
+                  rows={3}
+                  placeholder="Observações sobre o recebimento, conta global, referência, instruções internas..."
                 />
               </FormField>
             ) : null}
+          </FormSection>
 
-            {form.pagamento_tipo === "pix" ? (
-              <FormField label="Chave PIX" required error={formErrors.chave_pix}>
-                <Input
-                  value={form.chave_pix}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      chave_pix: event.target.value,
-                    }))
-                  }
-                  placeholder="CPF, telefone, e-mail ou chave aleatória"
-                />
+          <FormSection title="Operação" description="Status e observações internas.">
+            <FormGrid>
+              <FormField label="Técnico ativo">
+                <div className="flex min-h-10 items-center gap-3 rounded-lg border border-border bg-background px-3">
+                  <Switch
+                    checked={form.ativo}
+                    onCheckedChange={(checked) =>
+                      setForm((current) => ({ ...current, ativo: checked }))
+                    }
+                    id="tecnico-ativo"
+                  />
+
+                  <label
+                    htmlFor="tecnico-ativo"
+                    className="cursor-pointer text-sm text-muted-foreground"
+                  >
+                    {form.ativo
+                      ? "Disponível para novos serviços"
+                      : "Mantido apenas para histórico"}
+                  </label>
+                </div>
               </FormField>
-            ) : null}
+            </FormGrid>
 
-            {form.pagamento_tipo === "conta_br" ? (
-              <>
-                <FormField label="Banco" required error={formErrors.banco_nome}>
-                  <Input
-                    value={form.banco_nome}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        banco_nome: event.target.value,
-                      }))
-                    }
-                    placeholder="Ex.: Sicoob"
-                  />
-                </FormField>
-
-                <FormField label="Agência" required error={formErrors.agencia}>
-                  <Input
-                    value={form.agencia}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        agencia: event.target.value,
-                      }))
-                    }
-                    placeholder="0001"
-                  />
-                </FormField>
-
-                <FormField label="Conta" required error={formErrors.conta_bancaria}>
-                  <Input
-                    value={form.conta_bancaria}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        conta_bancaria: event.target.value,
-                      }))
-                    }
-                    placeholder="12345-6"
-                  />
-                </FormField>
-              </>
-            ) : null}
-
-            {form.pagamento_tipo === "iban" ? (
-              <>
-                <FormField label="Banco / instituição">
-                  <Input
-                    value={form.banco_nome}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        banco_nome: event.target.value,
-                      }))
-                    }
-                    placeholder="Ex.: Intesa Sanpaolo / Wise"
-                  />
-                </FormField>
-
-                <FormField label="IBAN" required error={formErrors.iban}>
-                  <Input
-                    value={form.iban}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        iban: event.target.value.toUpperCase(),
-                      }))
-                    }
-                    placeholder="IT60X0542811101000000123456"
-                  />
-                </FormField>
-
-                <FormField label="BIC / SWIFT">
-                  <Input
-                    value={form.bic_swift}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        bic_swift: event.target.value.toUpperCase(),
-                      }))
-                    }
-                    placeholder="BCITITMM"
-                  />
-                </FormField>
-              </>
-            ) : null}
-          </FormGrid>
-
-          {form.pagamento_tipo ? (
-            <FormField label="Informações adicionais de pagamento">
+            <FormField label="Observações">
               <Textarea
-                value={form.dados_pagamento}
+                value={form.observacoes}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    dados_pagamento: event.target.value,
+                    observacoes: event.target.value,
                   }))
                 }
-                rows={3}
-                placeholder="Observações sobre o recebimento, conta global, referência, instruções internas..."
+                rows={4}
+                placeholder="Especialidades, disponibilidade, região de atuação, informações internas..."
               />
             </FormField>
-          ) : null}
-        </FormSection>
+          </FormSection>
+        </Form>
+      </Modal>
 
-        <FormSection title="Operação" description="Status e observações internas.">
-          <FormGrid>
-            <FormField label="Técnico ativo">
-              <div className="flex min-h-10 items-center gap-3 rounded-lg border border-border bg-background px-3">
-                <Switch
-                  checked={form.ativo}
-                  onCheckedChange={(checked) =>
-                    setForm((current) => ({ ...current, ativo: checked }))
-                  }
-                  id="tecnico-ativo"
-                />
-
-                <label
-                  htmlFor="tecnico-ativo"
-                  className="cursor-pointer text-sm text-muted-foreground"
-                >
-                  {form.ativo
-                    ? "Disponível para novos serviços"
-                    : "Mantido apenas para histórico"}
-                </label>
-              </div>
-            </FormField>
-          </FormGrid>
-
-          <FormField label="Observações">
-            <Textarea
-              value={form.observacoes}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  observacoes: event.target.value,
-                }))
-              }
-              rows={4}
-              placeholder="Especialidades, disponibilidade, região de atuação, informações internas..."
-            />
-          </FormField>
-        </FormSection>
-      </Form>
-    </Modal>
+      <ImageCropModal
+        key={cropKey}
+        open={cropOpen}
+        file={cropSource}
+        title="Ajustar foto do técnico"
+        onClose={() => setCropOpen(false)}
+        onConfirm={handleCropConfirm}
+      />
+    </>
   );
 }

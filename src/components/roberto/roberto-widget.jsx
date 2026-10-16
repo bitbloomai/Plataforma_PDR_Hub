@@ -3,16 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  ArrowUp,
   Check,
   Loader2,
+  Mic,
   RotateCcw,
   Send,
   ShieldCheck,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 
 import { Button, Portal } from "@/components/shared";
+
+import { blobToWav, formatDuration, isAudioRecordingSupported } from "./audio-utils";
+import { useAudioRecorder } from "./use-audio-recorder";
+
+const MAX_RECORDING_SECONDS = 120;
+const MIN_RECORDING_SECONDS = 0.6;
 
 const STORAGE_KEY = "pdr.roberto.conversation.v1";
 const STATE_STORAGE_KEY = "pdr.roberto.operational-state.v1";
@@ -151,6 +160,68 @@ function ConfirmationCard({ confirmation, onConfirm, onCancel, confirming }) {
   );
 }
 
+function RecordingBar({ elapsed, levels, transcribing, onCancel, onFinish }) {
+  const remaining = MAX_RECORDING_SECONDS - elapsed;
+
+  if (transcribing) {
+    return (
+      <div className="flex min-h-9 flex-1 items-center gap-2.5 px-2 text-sm text-muted-foreground" role="status">
+        <Loader2 className="size-4 animate-spin text-primary" />
+        Transcrevendo áudio...
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="size-9 shrink-0 rounded-lg text-danger hover:bg-danger/10"
+        onClick={onCancel}
+        aria-label="Descartar áudio"
+        title="Descartar áudio"
+      >
+        <Trash2 className="size-4" />
+      </Button>
+
+      <div className="flex min-h-9 min-w-0 flex-1 items-center gap-2.5 px-1" role="status" aria-live="off">
+        <span className="relative flex size-2.5 shrink-0">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-danger/60" />
+          <span className="relative inline-flex size-2.5 rounded-full bg-danger" />
+        </span>
+        <span
+          className={`w-9 shrink-0 text-sm font-medium tabular-nums ${
+            remaining <= 10 ? "text-warning" : "text-foreground"
+          }`}
+          aria-label={`Gravando: ${formatDuration(elapsed)}`}
+        >
+          {formatDuration(elapsed)}
+        </span>
+        <div className="flex h-7 min-w-0 flex-1 items-center justify-end gap-[3px] overflow-hidden" aria-hidden="true">
+          {levels.map((level, index) => (
+            <span
+              key={index}
+              className="w-[3px] shrink-0 rounded-full bg-primary transition-[height] duration-100"
+              style={{ height: `${Math.max(3, Math.round(level * 26))}px`, opacity: 0.35 + (index / levels.length) * 0.65 }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <Button
+        size="icon"
+        className="size-9 shrink-0 rounded-lg"
+        onClick={onFinish}
+        aria-label="Concluir gravação e transcrever"
+        title="Concluir e transcrever"
+      >
+        <ArrowUp className="size-4" />
+      </Button>
+    </>
+  );
+}
+
 function TypingIndicator() {
   return (
     <div className="flex items-center gap-2.5">
@@ -179,13 +250,24 @@ export function RobertoWidget() {
   const [error, setError] = useState("");
   const [operationalState, setOperationalState] = useState(null);
   const [hydrated, setHydrated] = useState(false);
+  const [micSupported, setMicSupported] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+
+  const recorder = useAudioRecorder({
+    maxDuration: MAX_RECORDING_SECONDS,
+    onAutoStop: () => finishRecording(),
+  });
+  const recording = recorder.status === "recording";
+  const cancelRecording = recorder.cancel;
+  const voiceBusy = recorder.status !== "idle" || transcribing;
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       setMessages(loadConversation());
       setOperationalState(loadOperationalState());
+      setMicSupported(isAudioRecordingSupported());
       setHydrated(true);
     });
     return () => cancelAnimationFrame(frame);
@@ -225,11 +307,71 @@ export function RobertoWidget() {
   useEffect(() => {
     if (!open) return undefined;
     function closeOnEscape(event) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      // Esc durante a gravação descarta o áudio, como no WhatsApp; senão fecha o chat.
+      if (recording) cancelRecording();
+      else setOpen(false);
     }
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [open]);
+  }, [cancelRecording, open, recording]);
+
+  async function startRecording() {
+    if (voiceBusy || loading || confirming) return;
+    setError("");
+    try {
+      await recorder.start();
+    } catch (recordError) {
+      setError(recordError.message);
+    }
+  }
+
+  async function finishRecording() {
+    if (recorder.status !== "recording") return;
+    setTranscribing(true);
+    setError("");
+
+    try {
+      const blob = await recorder.stop();
+      if (!blob) throw new Error("Nenhum áudio foi capturado. Tente novamente.");
+
+      const { wav, duration } = await blobToWav(blob);
+      if (duration < MIN_RECORDING_SECONDS) {
+        throw new Error("Áudio muito curto. Fale um pouco mais antes de concluir.");
+      }
+
+      const formData = new FormData();
+      formData.append("audio", wav, "roberto-audio.wav");
+
+      const response = await fetch("/api/roberto/transcribe", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Não foi possível transcrever o áudio.");
+
+      const text = String(payload.text || "").trim();
+      if (!text) throw new Error("Não identifiquei fala no áudio. Tente gravar novamente.");
+
+      setInput((current) => [current.trim(), text].filter(Boolean).join(" ").slice(0, 5000));
+      requestAnimationFrame(() => {
+        const field = inputRef.current;
+        if (!field) return;
+        field.focus({ preventScroll: true });
+        field.setSelectionRange(field.value.length, field.value.length);
+      });
+    } catch (transcribeError) {
+      setError(transcribeError.message || "Não foi possível transcrever o áudio.");
+    } finally {
+      setTranscribing(false);
+    }
+  }
+
+  function closeWidget() {
+    if (recording) recorder.cancel();
+    setOpen(false);
+  }
 
   const hasPendingConfirmation = useMemo(
     () => messages.some((message) => message.confirmation?.status === "pending"),
@@ -247,7 +389,7 @@ export function RobertoWidget() {
 
   async function submitMessage(rawValue) {
     const content = String(rawValue || input).trim();
-    if (!content || loading || confirming) return;
+    if (!content || loading || confirming || voiceBusy) return;
     const userMessage = { id: makeId(), role: "user", content };
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
@@ -326,6 +468,7 @@ export function RobertoWidget() {
   }
 
   function resetConversation() {
+    if (recording) recorder.cancel();
     setMessages([WELCOME]);
     setInput("");
     setError("");
@@ -384,7 +527,7 @@ export function RobertoWidget() {
             <Button variant="ghost" size="iconSm" onClick={resetConversation} aria-label="Limpar conversa" title="Limpar conversa">
               <RotateCcw className="size-4" />
             </Button>
-            <Button variant="ghost" size="iconSm" onClick={() => setOpen(false)} aria-label="Fechar Roberto">
+            <Button variant="ghost" size="iconSm" onClick={closeWidget} aria-label="Fechar Roberto">
               <X className="size-4.5" />
             </Button>
           </header>
@@ -420,26 +563,65 @@ export function RobertoWidget() {
               </div>
             ) : null}
 
-            <div className="flex items-end gap-2 rounded-xl border border-border bg-background p-1.5 transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15">
-              <textarea
-                ref={inputRef}
-                rows={1}
-                value={input}
-                onChange={(event) => setInput(event.target.value.slice(0, 5000))}
-                onKeyDown={handleKeyDown}
-                placeholder={hasPendingConfirmation ? "Você pode confirmar acima ou enviar outra mensagem" : "Digite uma mensagem..."}
-                className="max-h-28 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground"
-                disabled={loading || Boolean(confirming)}
-              />
-              <Button
-                size="icon"
-                className="size-9 shrink-0 rounded-lg"
-                onClick={() => submitMessage()}
-                disabled={!input.trim() || loading || Boolean(confirming)}
-                aria-label="Enviar mensagem"
-              >
-                {loading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-              </Button>
+            <div
+              className={`flex items-end gap-2 rounded-xl border bg-background p-1.5 transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15 ${
+                recording ? "border-danger/40" : "border-border"
+              }`}
+            >
+              {recording || transcribing ? (
+                <RecordingBar
+                  elapsed={recorder.elapsed}
+                  levels={recorder.levels}
+                  transcribing={transcribing}
+                  onCancel={cancelRecording}
+                  onFinish={finishRecording}
+                />
+              ) : (
+                <>
+                  <textarea
+                    ref={inputRef}
+                    rows={1}
+                    value={input}
+                    onChange={(event) => setInput(event.target.value.slice(0, 5000))}
+                    onKeyDown={handleKeyDown}
+                    placeholder={
+                      hasPendingConfirmation
+                        ? "Você pode confirmar acima ou enviar outra mensagem"
+                        : micSupported
+                          ? "Digite ou grave um áudio..."
+                          : "Digite uma mensagem..."
+                    }
+                    className="max-h-28 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground"
+                    disabled={loading || Boolean(confirming)}
+                  />
+                  {micSupported ? (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-9 shrink-0 rounded-lg text-muted-foreground hover:text-foreground"
+                      onClick={startRecording}
+                      disabled={loading || Boolean(confirming) || recorder.status === "requesting"}
+                      aria-label="Gravar áudio"
+                      title="Gravar áudio"
+                    >
+                      {recorder.status === "requesting" ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Mic className="size-4.5" />
+                      )}
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="icon"
+                    className="size-9 shrink-0 rounded-lg"
+                    onClick={() => submitMessage()}
+                    disabled={!input.trim() || loading || Boolean(confirming)}
+                    aria-label="Enviar mensagem"
+                  >
+                    {loading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                  </Button>
+                </>
+              )}
             </div>
             <p className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground">
               <Sparkles className="size-3 text-primary" />

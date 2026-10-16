@@ -1859,7 +1859,7 @@ export default function TecnicoDetalhePage() {
 
       {/* Barra de seleção */}
       {selectedRows.length ? (
-        <div className="fixed inset-x-3 bottom-3 z-40 mx-auto max-w-3xl rounded-xl border border-border bg-surface p-3 shadow-2xl sm:bottom-5">
+        <div className="fixed inset-x-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-40 mx-auto max-w-3xl rounded-xl border border-border bg-surface p-3 shadow-2xl md:bottom-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">

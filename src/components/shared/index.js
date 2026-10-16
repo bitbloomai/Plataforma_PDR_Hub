@@ -19,3 +19,4 @@ export {
   RadioGroup,
 } from "./Form";
 export { Table } from "./Table";
+export { ImageCropModal, MAX_CROP_SOURCE_SIZE } from "./ImageCropModal";

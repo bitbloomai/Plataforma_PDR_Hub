@@ -12,6 +12,7 @@ import {
   Download,
   Filter,
   Layers3,
+  ListChecks,
   Pencil,
   Plus,
   Printer,
@@ -523,6 +524,16 @@ export default function FinanceiroPage() {
   const [settling, setSettling] = useState(false);
   const [reopeningId, setReopeningId] = useState("");
 
+  const [selectedMovementIds, setSelectedMovementIds] = useState([]);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkMovements, setBulkMovements] = useState([]);
+  const [bulkForm, setBulkForm] = useState({
+    data_pagamento: todayISO(),
+    forma_pagamento: "",
+    observacoes: "",
+  });
+  const [bulkSettling, setBulkSettling] = useState(false);
+
   const [deleteMovementTarget, setDeleteMovementTarget] = useState(null);
   const [deletingMovement, setDeletingMovement] = useState(false);
 
@@ -798,6 +809,45 @@ export default function FinanceiroPage() {
     const start = (page - 1) * pageSize;
     return filteredMovements.slice(start, start + pageSize);
   }, [filteredMovements, page, pageSize]);
+
+  // Baixa em lote: só contam os pendentes visíveis no filtro/aba atual.
+  const pendingFilteredMovements = useMemo(
+    () => filteredMovements.filter((movement) => !isPaid(movement.status)),
+    [filteredMovements]
+  );
+
+  const selectedMovements = useMemo(() => {
+    const selected = new Set(selectedMovementIds.map(String));
+    return pendingFilteredMovements.filter((movement) => selected.has(String(movement.id)));
+  }, [pendingFilteredMovements, selectedMovementIds]);
+
+  const summarizeMovements = useCallback(
+    (rows) => {
+      const revenues = rows.filter(isRevenue);
+      const expenses = rows.filter(isExpense);
+      const revenueTotal = sumBy(revenues, (row) => moneyValue(row.valor, row.moeda));
+      const expenseTotal = sumBy(expenses, (row) => moneyValue(row.valor, row.moeda));
+
+      return {
+        revenueCount: revenues.length,
+        expenseCount: expenses.length,
+        revenueTotal,
+        expenseTotal,
+        net: revenueTotal - expenseTotal,
+      };
+    },
+    [moneyValue]
+  );
+
+  const selectedSummary = useMemo(
+    () => summarizeMovements(selectedMovements),
+    [selectedMovements, summarizeMovements]
+  );
+
+  const bulkSummary = useMemo(
+    () => summarizeMovements(bulkMovements),
+    [bulkMovements, summarizeMovements]
+  );
 
   const paginationItems = useMemo(
     () => buildPagination(page, totalPages),
@@ -1138,6 +1188,112 @@ export default function FinanceiroPage() {
       );
     } finally {
       setSettling(false);
+    }
+  }
+
+  function openBulkSettlement(rows) {
+    const pending = rows.filter((movement) => !isPaid(movement.status));
+
+    if (!pending.length) {
+      toast.warning("Nada para baixar", "Selecione lançamentos pendentes para dar baixa.");
+      return;
+    }
+
+    setBulkMovements(pending);
+    setBulkForm({
+      data_pagamento: todayISO(timezone),
+      forma_pagamento: "",
+      observacoes: "",
+    });
+    setBulkOpen(true);
+  }
+
+  async function handleBulkSettlement(event) {
+    event.preventDefault();
+    if (!bulkMovements.length || !contaId) return;
+
+    if (!bulkForm.data_pagamento) {
+      toast.warning("Informe a data", "Selecione a data do recebimento ou pagamento.");
+      return;
+    }
+
+    setBulkSettling(true);
+
+    try {
+      const payload = {
+        status: "pago",
+        data_pagamento: bulkForm.data_pagamento,
+        forma_pagamento: cleanText(bulkForm.forma_pagamento),
+        updated_by: usuarioId || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      // Observação é opcional: em branco, preserva a observação de cada lançamento.
+      const note = cleanText(bulkForm.observacoes);
+      if (note) payload.observacoes = note;
+
+      const beforeById = new Map(bulkMovements.map((movement) => [movement.id, movement]));
+      const ids = [...beforeById.keys()];
+      const updated = [];
+
+      // Lotes menores evitam URLs longas demais no filtro `in`.
+      for (let index = 0; index < ids.length; index += 100) {
+        const { data, error: updateError } = await supabase
+          .from("movimentacoes_financeiras")
+          .update(payload)
+          .in("id", ids.slice(index, index + 100))
+          .eq("conta_id", contaId)
+          .select("id,tipo,descricao,valor,moeda,status,data_pagamento,forma_pagamento");
+
+        if (updateError) throw updateError;
+        updated.push(...(data || []));
+      }
+
+      try {
+        await supabase.from("auditoria").insert(
+          updated.map((movement) => ({
+            conta_id: contaId,
+            usuario_id: usuarioId || null,
+            entidade: "movimentacoes_financeiras",
+            acao: isRevenue(movement) ? "receber" : "pagar",
+            registro_id: movement.id,
+            descricao: `Baixa em lote · ${isRevenue(movement) ? "Receita recebida" : "Despesa paga"}: ${movement.descricao}.`,
+            dados_anteriores: beforeById.get(movement.id) || null,
+            dados_novos: movement,
+          }))
+        );
+      } catch (auditError) {
+        console.warn("Auditoria financeira não registrada", auditError);
+      }
+
+      const summary = summarizeMovements(updated);
+      const parts = [
+        summary.revenueCount
+          ? `${summary.revenueCount} receita(s) · ${formatMoney(summary.revenueTotal)}`
+          : null,
+        summary.expenseCount
+          ? `${summary.expenseCount} despesa(s) · ${formatMoney(summary.expenseTotal)}`
+          : null,
+      ].filter(Boolean);
+
+      toast.success("Baixa realizada", parts.join(" | ") || "Lançamentos liquidados.");
+
+      if (updated.length < ids.length) {
+        toast.warning(
+          "Baixa parcial",
+          `${ids.length - updated.length} lançamento(s) não foram atualizados. Recarregue e confira.`
+        );
+      }
+
+      setSelectedMovementIds([]);
+      setBulkOpen(false);
+      setBulkMovements([]);
+      await loadData({ silent: true });
+    } catch (bulkError) {
+      console.error("Baixa em lote", bulkError);
+      toast.error("Não foi possível dar baixa", bulkError?.message || "Tente novamente.");
+    } finally {
+      setBulkSettling(false);
     }
   }
 
@@ -1766,7 +1922,11 @@ export default function FinanceiroPage() {
   );
 
   return (
-    <div className="space-y-5 sm:space-y-6">
+    <div
+      className={`space-y-5 sm:space-y-6 ${
+        activeTab !== "categories" && selectedMovements.length ? "pb-36 md:pb-24" : ""
+      }`}
+    >
       <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <p className="text-sm text-muted-foreground">
@@ -2068,6 +2228,11 @@ export default function FinanceiroPage() {
             data={pagedMovements}
             columns={movementColumns}
             loading={loading}
+            pagination={false}
+            selectable
+            selectedRows={selectedMovementIds}
+            onSelectionChange={setSelectedMovementIds}
+            isRowSelectable={(row) => !isPaid(row.status)}
             emptyTitle="Nenhuma movimentação encontrada"
             emptyDescription={
               hasMovementFilters
@@ -2495,6 +2660,180 @@ export default function FinanceiroPage() {
           )}
         </Form>
       </Drawer>
+
+      {activeTab !== "categories" && selectedMovements.length ? (
+        <div className="fixed inset-x-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-40 mx-auto max-w-3xl rounded-xl border border-border bg-surface p-3 shadow-2xl md:bottom-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
+                <ListChecks className="size-5" strokeWidth={1.8} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">
+                  {selectedMovements.length} lançamento(s) selecionado(s)
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {selectedSummary.revenueCount ? (
+                    <span className="text-success">
+                      + {formatMoney(selectedSummary.revenueTotal)} a receber
+                    </span>
+                  ) : null}
+                  {selectedSummary.revenueCount && selectedSummary.expenseCount ? " · " : null}
+                  {selectedSummary.expenseCount ? (
+                    <span className="text-danger">
+                      - {formatMoney(selectedSummary.expenseTotal)} a pagar
+                    </span>
+                  ) : null}
+                </p>
+                {selectedMovements.length < pendingFilteredMovements.length ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedMovementIds(pendingFilteredMovements.map((movement) => movement.id))
+                    }
+                    className="mt-0.5 text-xs font-medium text-foreground underline-offset-2 hover:underline"
+                  >
+                    Selecionar todos os {pendingFilteredMovements.length} pendentes do filtro
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex shrink-0 gap-2">
+              <Button variant="ghost" leftIcon={X} onClick={() => setSelectedMovementIds([])}>
+                Limpar
+              </Button>
+              <Button leftIcon={CheckCircle2} onClick={() => openBulkSettlement(selectedMovements)}>
+                Dar baixa
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <Modal
+        open={bulkOpen}
+        onClose={() => {
+          if (!bulkSettling) setBulkOpen(false);
+        }}
+        title="Baixa em lote"
+        description={`${bulkMovements.length} lançamento(s) serão marcados como ${
+          bulkSummary.revenueCount && bulkSummary.expenseCount
+            ? "recebidos/pagos"
+            : bulkSummary.revenueCount
+              ? "recebidos"
+              : "pagos"
+        }.`}
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setBulkOpen(false)} disabled={bulkSettling}>
+              Cancelar
+            </Button>
+            <Button type="submit" form="bulk-settlement-form" loading={bulkSettling} leftIcon={CheckCircle2}>
+              Confirmar baixa
+            </Button>
+          </>
+        }
+      >
+        <Form id="bulk-settlement-form" onSubmit={handleBulkSettlement}>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="rounded-xl border border-border bg-background p-3.5">
+              <p className="text-xs font-medium text-muted-foreground">
+                Receitas ({bulkSummary.revenueCount})
+              </p>
+              <p className="mt-1 text-lg font-semibold text-success">
+                + {formatMoney(bulkSummary.revenueTotal)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-border bg-background p-3.5">
+              <p className="text-xs font-medium text-muted-foreground">
+                Despesas ({bulkSummary.expenseCount})
+              </p>
+              <p className="mt-1 text-lg font-semibold text-danger">
+                - {formatMoney(bulkSummary.expenseTotal)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-primary/50 bg-primary/10 p-3.5">
+              <p className="text-xs font-medium text-muted-foreground">Efeito no caixa</p>
+              <p
+                className={`mt-1 text-lg font-semibold ${
+                  bulkSummary.net < 0 ? "text-danger" : "text-foreground"
+                }`}
+              >
+                {formatMoney(bulkSummary.net)}
+              </p>
+            </div>
+          </div>
+
+          <FormSection>
+            <FormGrid>
+              <FormField label="Data" required>
+                <DateInput
+                  value={bulkForm.data_pagamento}
+                  onChange={(event) =>
+                    setBulkForm((current) => ({ ...current, data_pagamento: event.target.value }))
+                  }
+                />
+              </FormField>
+
+              <FormField label="Forma de pagamento">
+                <Input
+                  value={bulkForm.forma_pagamento}
+                  onChange={(event) =>
+                    setBulkForm((current) => ({ ...current, forma_pagamento: event.target.value }))
+                  }
+                  placeholder="Ex.: Transferência, dinheiro, cartão..."
+                />
+              </FormField>
+            </FormGrid>
+
+            <FormField
+              label="Observações"
+              hint="Opcional. Em branco, mantém a observação atual de cada lançamento."
+            >
+              <Textarea
+                value={bulkForm.observacoes}
+                onChange={(event) =>
+                  setBulkForm((current) => ({ ...current, observacoes: event.target.value }))
+                }
+                rows={2}
+                placeholder="Referência do lote, comprovante..."
+              />
+            </FormField>
+          </FormSection>
+
+          <div className="max-h-60 overflow-y-auto rounded-xl border border-border">
+            <table className="w-full text-left text-xs">
+              <thead className="sticky top-0 bg-surface-2 text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Data</th>
+                  <th className="px-3 py-2 font-medium">Descrição</th>
+                  <th className="px-3 py-2 font-medium">Tipo</th>
+                  <th className="px-3 py-2 text-right font-medium">Valor</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {bulkMovements.map((movement) => (
+                  <tr key={movement.id}>
+                    <td className="whitespace-nowrap px-3 py-2">{formatDate(movement.data_competencia)}</td>
+                    <td className="max-w-56 truncate px-3 py-2 text-foreground">{movement.descricao}</td>
+                    <td className="px-3 py-2">{isRevenue(movement) ? "Receita" : "Despesa"}</td>
+                    <td
+                      className={`whitespace-nowrap px-3 py-2 text-right font-semibold ${
+                        isRevenue(movement) ? "text-success" : "text-foreground"
+                      }`}
+                    >
+                      {isExpense(movement) ? "- " : "+ "}
+                      {formatMoney(movement.valor, movement.moeda)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Form>
+      </Modal>
 
       <Modal
         open={settlementOpen}

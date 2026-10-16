@@ -63,6 +63,7 @@ export function Table({
   selectable = false,
   selectedRows = [],
   onSelectionChange,
+  isRowSelectable,
   onRowClick,
   toolbar,
   stickyHeader = false,
@@ -148,9 +149,10 @@ export function Table({
     return sortedData.slice(start, start + rowsPerPage);
   }, [manualPagination, pagination, rowsPerPage, safePage, sortedData]);
 
-  const visibleIds = visibleRows.map((row, index) =>
-    typeof rowKey === "function" ? rowKey(row, index) : getByPath(row, rowKey)
-  );
+  // Somente as linhas selecionáveis participam do "selecionar todos".
+  const visibleIds = visibleRows
+    .filter((row) => !isRowSelectable || isRowSelectable(row))
+    .map((row) => (typeof rowKey === "function" ? rowKey(row, visibleRows.indexOf(row)) : getByPath(row, rowKey)));
   const selectedSet = new Set(selectedRows.map(String));
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedSet.has(String(id)));
   const someVisibleSelected = visibleIds.some((id) => selectedSet.has(String(id)));
@@ -250,6 +252,7 @@ export function Table({
                       if (node) node.indeterminate = !allVisibleSelected && someVisibleSelected;
                     }}
                     onChange={toggleVisible}
+                    disabled={!visibleIds.length}
                     aria-label="Selecionar registros visíveis"
                     className="size-4 rounded border-border-strong accent-primary"
                   />
@@ -326,7 +329,8 @@ export function Table({
                 ))
               : visibleRows.map((row, rowIndex) => {
                   const id = typeof rowKey === "function" ? rowKey(row, rowIndex) : getByPath(row, rowKey);
-                  const selected = selectedSet.has(String(id));
+                  const rowSelectable = !isRowSelectable || isRowSelectable(row);
+                  const selected = rowSelectable && selectedSet.has(String(id));
 
                   return (
                     <tr
@@ -343,9 +347,10 @@ export function Table({
                           <input
                             type="checkbox"
                             checked={selected}
+                            disabled={!rowSelectable}
                             onChange={() => toggleRow(id)}
                             aria-label={`Selecionar registro ${rowIndex + 1}`}
-                            className="size-4 rounded border-border-strong accent-primary"
+                            className="size-4 rounded border-border-strong accent-primary disabled:cursor-not-allowed disabled:opacity-30"
                           />
                         </td>
                       ) : null}
