@@ -33,6 +33,39 @@ function tool(name, description, parameters) {
   return { type: "function", function: { name, description, parameters } };
 }
 
+const MAX_BATCH_SERVICES = 20;
+
+// Campos de criação/edição de serviço, compartilhados entre preparar_servico e o lote.
+function serviceItemProperties() {
+  return {
+    oficina_id: idProperty("ID exato da oficina."),
+    veiculo_id: idProperty("ID exato do veículo, quando já identificado por busca."),
+    veiculo: {
+      ...objectSchema({
+        placa: stringProperty("Placa (ou número do vidro/chassi em veículo zero). Omita quando sem_placa=true."),
+        sem_placa: booleanProperty("true somente quando o usuário não tem a placa e autorizou cadastrar sem ela; o servidor gera uma identificação provisória única."),
+        marca: stringProperty("Marca opcional."),
+        modelo: stringProperty("Modelo opcional."),
+        ano: numberProperty("Ano opcional."),
+        cor: stringProperty("Cor opcional."),
+        chassi: stringProperty("Chassi opcional."),
+        observacoes: stringProperty("Observações opcionais."),
+      }),
+      description: "Use na criação quando não houver veiculo_id. Se a placa já existir na conta, o veículo existente será reutilizado; caso contrário, será cadastrado automaticamente com o serviço.",
+    },
+    data_servico: stringProperty("Data YYYY-MM-DD."),
+    valor: numberProperty("Valor total positivo."),
+    status: { type: "string", enum: SERVICE_STATUSES },
+    tecnicos: {
+      type: "array",
+      description: "Técnicos e percentuais deste serviço.",
+      items: objectSchema({ tecnico_id: idProperty("ID exato."), percentual: numberProperty("Percentual > 0 e <= 100.") }, ["tecnico_id", "percentual"]),
+    },
+    descricao: stringProperty("Descrição."),
+    observacoes: stringProperty("Observações."),
+  };
+}
+
 const periodProperties = {
   periodo: {
     type: "string",
@@ -215,35 +248,23 @@ export const ROBERTO_TOOLS = [
   ),
   tool(
     "preparar_servico",
-    "Valida e prepara criação, edição ou mudança de status de serviço usando as regras financeiras reais. Na criação, se o veículo ainda não estiver cadastrado, envie seus dados em veiculo: o servidor reutiliza uma placa existente ou cadastra o veículo junto com o serviço, na mesma confirmação.",
+    "Valida e prepara criação, edição ou mudança de status de UM serviço usando as regras financeiras reais. Na criação, se o veículo ainda não estiver cadastrado, envie seus dados em veiculo: o servidor reutiliza uma placa existente ou cadastra o veículo junto com o serviço, na mesma confirmação. Para criar dois ou mais serviços, use preparar_servicos_lote.",
     objectSchema({
       operacao: { type: "string", enum: ["criar", "editar", "alterar_status"] },
       id: idProperty("Obrigatório em edição/status."),
-      oficina_id: idProperty("ID exato da oficina."),
-      veiculo_id: idProperty("ID exato do veículo."),
-      veiculo: {
-        ...objectSchema({
-          placa: stringProperty("Placa obrigatória."),
-          marca: stringProperty("Marca opcional."),
-          modelo: stringProperty("Modelo opcional."),
-          ano: numberProperty("Ano opcional."),
-          cor: stringProperty("Cor opcional."),
-          chassi: stringProperty("Chassi opcional."),
-          observacoes: stringProperty("Observações opcionais."),
-        }, ["placa"]),
-        description: "Use na criação quando não houver veiculo_id. Se a placa já existir na conta, o veículo existente será reutilizado; caso contrário, será cadastrado automaticamente com o serviço.",
-      },
-      data_servico: stringProperty("Data YYYY-MM-DD."),
-      valor: numberProperty("Valor total positivo."),
-      status: { type: "string", enum: SERVICE_STATUSES },
-      tecnicos: {
-        type: "array",
-        description: "Técnicos e percentuais deste serviço.",
-        items: objectSchema({ tecnico_id: idProperty("ID exato."), percentual: numberProperty("Percentual > 0 e <= 100.") }, ["tecnico_id", "percentual"]),
-      },
-      descricao: stringProperty("Descrição."),
-      observacoes: stringProperty("Observações."),
+      ...serviceItemProperties(),
     }, ["operacao"])
+  ),
+  tool(
+    "preparar_servicos_lote",
+    `Valida e prepara a criação de VÁRIOS serviços (2 a ${MAX_BATCH_SERVICES}) em um único preview com um único botão de confirmação. Use sempre que o usuário pedir para lançar/cadastrar mais de um serviço. Cada item segue as mesmas regras de criação de preparar_servico; veículos não cadastrados são criados junto, na mesma confirmação. Nada é gravado antes da confirmação e, ao confirmar, ou todos os serviços são gravados ou nenhum.`,
+    objectSchema({
+      servicos: {
+        type: "array",
+        description: "Serviços a criar, na ordem informada pelo usuário.",
+        items: objectSchema(serviceItemProperties()),
+      },
+    }, ["servicos"])
   ),
   tool(
     "preparar_financeiro",
@@ -1107,7 +1128,44 @@ async function servicePlan(args, context) {
   };
 }
 
+/**
+ * Quando o usuário autoriza cadastrar sem placa, gera uma identificação provisória
+ * única (ex.: PROV3FA91C) antes de assinar a confirmação, para que preview e
+ * gravação usem exatamente a mesma placa.
+ */
+async function assignProvisionalPlates(items, context) {
+  const generated = new Set();
+
+  for (const item of items) {
+    const vehicle = item?.veiculo;
+    if (item?.veiculo_id || !vehicle?.sem_placa || normalizePlate(vehicle.placa)) continue;
+
+    let plate = null;
+    for (let attempt = 0; attempt < 6 && !plate; attempt += 1) {
+      const candidate = `PROV${randomBytes(3).toString("hex").toUpperCase()}`;
+      if (generated.has(candidate)) continue;
+      const { data, error } = await context.db
+        .from("veiculos")
+        .select("id")
+        .eq("conta_id", context.usuario.conta_id)
+        .eq("placa", candidate)
+        .maybeSingle();
+      throwIfDb(error);
+      if (!data) plate = candidate;
+    }
+    if (!plate) throw new RobertoError("Não foi possível gerar uma identificação provisória para o veículo.");
+
+    generated.add(plate);
+    item.veiculo = {
+      ...vehicle,
+      placa: plate,
+      observacoes: vehicle.observacoes || "Identificação provisória gerada pelo Roberto: placa não informada.",
+    };
+  }
+}
+
 async function prepareService(args, context) {
+  if (args.operacao === "criar") await assignProvisionalPlates([args], context);
   const plan = await servicePlan(args, context);
   if (plan.missing) {
     return {
@@ -1329,6 +1387,186 @@ async function commitService(args, context) {
   }
 }
 
+function batchItems(args) {
+  const items = Array.isArray(args?.servicos) ? args.servicos : [];
+  return items.map((item) => ({
+    ...(item && typeof item === "object" ? item : {}),
+    operacao: "criar",
+  }));
+}
+
+function previewDate(value) {
+  const [year, month, day] = String(value || "").split("-");
+  return year && month && day ? `${day}/${month}/${year}` : String(value || "");
+}
+
+/** Valida todos os itens do lote sem gravar nada; erros são agrupados por item (1-based). */
+async function servicesBatchPlan(items, context) {
+  if (!items.length) {
+    return { plans: [], errors: [{ item: null, message: "Informe ao menos um serviço no lote." }] };
+  }
+  if (items.length > MAX_BATCH_SERVICES) {
+    throw new RobertoError(`Envie no máximo ${MAX_BATCH_SERVICES} serviços por lote.`);
+  }
+
+  const plans = [];
+  const errors = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    try {
+      const plan = await servicePlan(items[index], context);
+      if (plan.missing) {
+        errors.push({
+          item: index + 1,
+          missing_fields: plan.missing,
+          validation_errors: plan.validation_errors,
+        });
+      } else {
+        plans.push(plan);
+      }
+    } catch (error) {
+      if (!(error instanceof RobertoError)) throw error;
+      errors.push({ item: index + 1, message: error.message });
+    }
+  }
+
+  return { plans, errors };
+}
+
+function batchErrorText(error) {
+  if (!error) return "";
+  const detail =
+    error.message ||
+    (error.validation_errors || []).map((item) => item.message).join(" ") ||
+    (error.missing_fields || []).join(", ");
+  return error.item ? `item ${error.item}: ${detail}` : detail;
+}
+
+async function prepareServicesBatch(args, context) {
+  const items = batchItems(args);
+  await assignProvisionalPlates(items, context);
+  const { plans, errors } = await servicesBatchPlan(items, context);
+
+  if (errors.length) {
+    return {
+      ok: false,
+      message:
+        "Alguns serviços do lote têm dados faltantes ou inválidos. Peça ao usuário somente o que falta nesses itens e depois chame preparar_servicos_lote novamente com o lote completo.",
+      item_errors: errors,
+      missing_fields: [...new Set(errors.flatMap((error) => error.missing_fields || []))],
+    };
+  }
+
+  const currency = context.configuracao.moeda || "EUR";
+  const money = (value) => `${currency} ${roundMoney(value).toFixed(2)}`;
+  const total = plans.reduce((sum, plan) => sum + plan.payload.valor, 0);
+  const repasses = plans.reduce(
+    (sum, plan) =>
+      sum +
+      plan.technicianDrafts.reduce(
+        (subtotal, item) => subtotal + roundMoney((plan.payload.valor * safeNumber(item.percentual)) / 100),
+        0
+      ),
+    0
+  );
+  const newPlates = new Set(
+    plans.filter((plan) => plan.newVehiclePayload).map((plan) => plan.newVehiclePayload.placa)
+  );
+  const offices = new Set(plans.map((plan) => plan.office.nome));
+
+  return confirmation(context, "preparar_servicos_lote", { servicos: items }, {
+    kind: "servicos_lote",
+    title: `Lançar ${plans.length} serviço(s)`,
+    description: newPlates.size
+      ? `${newPlates.size} veículo(s) novo(s) serão cadastrados junto. O recebível das oficinas e os repasses serão gerados como pendentes.`
+      : "O recebível das oficinas e os repasses serão gerados como pendentes.",
+    fields: [
+      { label: "Serviços", value: plans.length },
+      { label: "Oficina", value: [...offices].join(", ") },
+      { label: "Valor total", value: money(total) },
+      { label: "Repasses", value: money(repasses) },
+      ...(newPlates.size ? [{ label: "Veículos novos", value: newPlates.size }] : []),
+    ],
+    items: plans.map((plan) => ({
+      title: [plan.vehicle.marca, plan.vehicle.modelo, plan.vehicle.cor].filter(Boolean).join(" ") || "Veículo",
+      subtitle: [previewDate(plan.payload.data_servico), plan.vehicle.placa, offices.size > 1 ? plan.office.nome : null]
+        .filter(Boolean)
+        .join(" · "),
+      detail: plan.technicianDrafts
+        .map((item) => {
+          const technician = plan.technicians.find((row) => row.id === item.tecnico_id);
+          return `${technician?.nome || "Técnico"} ${item.percentual}%`;
+        })
+        .join(", "),
+      value: money(plan.payload.valor),
+      badge: plan.newVehiclePayload ? "Veículo novo" : null,
+    })),
+  });
+}
+
+async function rollbackBatchServices(results, context) {
+  for (const result of [...results].reverse()) {
+    const serviceId = result?.servico?.id;
+    try {
+      if (serviceId) {
+        await context.db.from("movimentacoes_financeiras").delete().eq("conta_id", context.usuario.conta_id).eq("servico_id", serviceId).in("origem", AUTO_ORIGINS);
+        await context.db.from("servicos_tecnicos").delete().eq("conta_id", context.usuario.conta_id).eq("servico_id", serviceId);
+        await context.db.from("servicos").delete().eq("conta_id", context.usuario.conta_id).eq("id", serviceId);
+        await logRobertoAudit(context, {
+          entidade: "servicos",
+          acao: "excluir",
+          registroId: serviceId,
+          descricao: "Serviço revertido porque o lote não pôde ser concluído.",
+          before: result.servico,
+        });
+      }
+      if (result?.veiculo_criado?.id) {
+        await context.db.from("veiculos").delete().eq("conta_id", context.usuario.conta_id).eq("id", result.veiculo_criado.id);
+      }
+    } catch (error) {
+      console.error("Roberto: falha ao reverter item do lote", error);
+    }
+  }
+}
+
+async function commitServicesBatch(args, context) {
+  const items = batchItems(args);
+
+  // Revalida o lote inteiro antes de gravar qualquer item.
+  const { errors } = await servicesBatchPlan(items, context);
+  if (errors.length) {
+    throw new RobertoError(
+      `O lote não foi gravado porque os dados mudaram desde o preview (${batchErrorText(errors[0])}). Peça ao Roberto para preparar novamente.`
+    );
+  }
+
+  const results = [];
+  try {
+    // Sequencial: um mesmo veículo novo em dois itens é criado no primeiro e reutilizado no segundo.
+    for (const item of items) {
+      results.push(await commitService(item, context));
+    }
+  } catch (error) {
+    await rollbackBatchServices(results, context);
+    const reason = error instanceof RobertoError ? error.message : "Falha inesperada ao gravar.";
+    throw new RobertoError(
+      `Nenhum serviço do lote foi gravado: o item ${results.length + 1} falhou. ${reason}`,
+      error instanceof RobertoError ? error.status : 500,
+      error instanceof RobertoError ? error.code : "BATCH_FAILED"
+    );
+  }
+
+  const vehicles = results.filter((result) => result.veiculo_criado).length;
+  return {
+    ok: true,
+    message: `${results.length} serviço(s) cadastrado(s) com sucesso${
+      vehicles ? `, com ${vehicles} veículo(s) novo(s)` : ""
+    }. O recebível das oficinas e os repasses dos técnicos foram gerados como pendentes.`,
+    servicos: results.map((result) => result.servico),
+    veiculos_criados: results.map((result) => result.veiculo_criado).filter(Boolean),
+  };
+}
+
 async function financialPlan(args, context) {
   if (!["liquidar", "reabrir"].includes(args.operacao)) {
     throw new RobertoError("Operação financeira inválida.");
@@ -1408,6 +1646,7 @@ const PREPARE_HANDLERS = {
   preparar_tecnico: prepareTechnician,
   preparar_veiculo: prepareVehicle,
   preparar_servico: prepareService,
+  preparar_servicos_lote: prepareServicesBatch,
   preparar_financeiro: prepareFinancial,
 };
 
@@ -1416,6 +1655,7 @@ const COMMIT_HANDLERS = {
   preparar_tecnico: commitTechnician,
   preparar_veiculo: commitVehicle,
   preparar_servico: commitService,
+  preparar_servicos_lote: commitServicesBatch,
   preparar_financeiro: commitFinancial,
 };
 

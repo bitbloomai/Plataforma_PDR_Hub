@@ -132,6 +132,37 @@ function ConfirmationCard({ confirmation, onConfirm, onCancel, confirming }) {
         ))}
       </dl>
 
+      {confirmation.items?.length ? (
+        <ol className="max-h-72 divide-y divide-border overflow-y-auto border-t border-border bg-background/60">
+          {confirmation.items.map((item, index) => (
+            <li key={`${index}-${item.title}-${item.subtitle}`} className="flex items-start gap-2.5 px-3.5 py-2.5">
+              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-surface-2 text-[10px] font-semibold text-muted-foreground">
+                {index + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate text-xs font-semibold text-foreground">{item.title}</p>
+                  {item.badge ? (
+                    <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+                      {item.badge}
+                    </span>
+                  ) : null}
+                </div>
+                {item.subtitle ? (
+                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.subtitle}</p>
+                ) : null}
+                {item.detail ? (
+                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</p>
+                ) : null}
+              </div>
+              {item.value ? (
+                <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-foreground">{item.value}</span>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+
       <div className="flex gap-2 border-t border-border p-3">
         {status === "pending" ? (
           <>
