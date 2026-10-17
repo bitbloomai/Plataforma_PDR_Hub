@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 
 const AUTH_PATHS = ["/login", "/signup", "/recuperar-senha", "/redefinir-senha"];
 
+function isPublicSignupEnabled() {
+  return process.env.ALLOW_PUBLIC_SIGNUP === "true";
+}
+
 export async function proxy(request) {
   let response = NextResponse.next({
     request,
@@ -38,6 +42,11 @@ export async function proxy(request) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
+
+  // Cadastro público desativado: contas novas são criadas pela equipe.
+  if (pathname === "/signup" && !isPublicSignupEnabled()) {
+    return NextResponse.redirect(new URL(user ? "/panel" : "/login", request.url));
+  }
 
   if (pathname.startsWith("/panel") && !user) {
     const redirectUrl = request.nextUrl.clone();

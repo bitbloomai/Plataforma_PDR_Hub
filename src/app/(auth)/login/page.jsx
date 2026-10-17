@@ -321,15 +321,12 @@ export default function LoginPage() {
 
         {/* Footer */}
         <div className="mt-7 border-t border-border pt-6 text-center">
-          <p className="text-[13px] text-muted-foreground">
-            Ainda não possui uma conta?{" "}
-            <Link
-              href="/signup"
-              className="font-semibold text-foreground transition-colors hover:text-primary-hover"
-            >
-              Criar conta
-            </Link>
-          </p>
+          <Link
+            href="/"
+            className="text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Voltar para o site
+          </Link>
         </div>
       </AuthCard>
 

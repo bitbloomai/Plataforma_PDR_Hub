@@ -6,6 +6,14 @@ import { createClient } from "@/lib/supabase/server";
 const DEFAULT_REDIRECT = "/panel";
 
 export async function POST(request) {
+  // Cadastro público desativado: contas novas são criadas pela equipe.
+  if (process.env.ALLOW_PUBLIC_SIGNUP !== "true") {
+    return NextResponse.json(
+      { error: "Cadastro indisponivel. Entre em contato para contratar o PDR Hub." },
+      { status: 403 }
+    );
+  }
+
   const { nome, contaNome, email, password } = await request.json();
 
   const normalizedEmail = String(email || "").trim().toLowerCase();
