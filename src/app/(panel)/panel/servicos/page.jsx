@@ -45,6 +45,7 @@ import {
   Select,
   Textarea,
 } from "@/components/shared";
+import { ServicePhotoField, ServicePhotoGallery } from "@/components/servicos/service-photos";
 import { createClient } from "@/lib/supabase/client";
 import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { localISO, todayISO } from "@/lib/dates";
@@ -54,6 +55,13 @@ import {
   buildServiceFinancialRows,
   buildServiceTechnicianRows,
 } from "@/lib/service-rules";
+import {
+  applyPhotoDraft,
+  createPhotoDraft,
+  hasPhotoChanges,
+  releasePhotoDraft,
+  removeAllServicePhotoFiles,
+} from "@/lib/service-photos";
 
 const PAGE_SIZES = [10, 20, 50];
 const SERVICE_STATUSES = ["agendado", "em_andamento", "concluido", "cancelado"];
@@ -824,6 +832,8 @@ export default function ServicosPage() {
   const [form, setForm] = useState(createEmptyForm);
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [photoDraft, setPhotoDraft] = useState(createPhotoDraft);
+  const [formSession, setFormSession] = useState(0);
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -1249,7 +1259,14 @@ export default function ServicosPage() {
     setDateTo(range.to);
   }
 
+  function resetPhotoDraft() {
+    releasePhotoDraft(photoDraft);
+    setPhotoDraft(createPhotoDraft());
+    setFormSession((current) => current + 1);
+  }
+
   function openCreate() {
+    resetPhotoDraft();
     setEditingService(null);
     setForm(createServiceForm(meRef.current?.configuracao?.timezone || me?.configuracao?.timezone));
     setFormErrors({});
@@ -1263,6 +1280,7 @@ export default function ServicosPage() {
       return link.tecnico_id;
     });
 
+    resetPhotoDraft();
     setEditingService(service);
     setForm({
       status: service.status || "agendado",
@@ -1581,6 +1599,7 @@ export default function ServicosPage() {
     setSaving(true);
     let createdServiceId = null;
     let createdVehicleId = null;
+    let savedServiceId = editingService?.id || null;
 
     try {
       if (editingService && editingFinancialLocked) {
@@ -1661,6 +1680,7 @@ export default function ServicosPage() {
           if (insertError) throw insertError;
           serviceId = data.id;
           createdServiceId = data.id;
+          savedServiceId = data.id;
         }
 
         if (editingService) {
@@ -1739,6 +1759,25 @@ export default function ServicosPage() {
         );
       }
 
+      // Fotos sobem depois do serviço salvo; uma falha aqui não desfaz o serviço.
+      if (savedServiceId && hasPhotoChanges(photoDraft)) {
+        const photoResult = await applyPhotoDraft(supabase, {
+          contaId: currentContaId,
+          serviceId: savedServiceId,
+          usuarioId: currentUsuarioId,
+          draft: photoDraft,
+        });
+
+        if (photoResult.errors.length) {
+          toast.warning(
+            "Serviço salvo, mas algumas fotos falharam",
+            `${photoResult.errors.slice(0, 2).join(" ")} Tente adicioná-las pelos detalhes do serviço.`
+          );
+        }
+      }
+
+      releasePhotoDraft(photoDraft);
+      setPhotoDraft(createPhotoDraft());
       setFormOpen(false);
       setEditingService(null);
       setForm(createServiceForm(currentMe?.configuracao?.timezone));
@@ -1908,6 +1947,9 @@ export default function ServicosPage() {
         .eq("conta_id", contaId);
 
       if (deleteError) throw deleteError;
+
+      // Os registros de foto saem em cascata; aqui limpamos os arquivos.
+      await removeAllServicePhotoFiles(supabase, { contaId, serviceId: deleteTarget.id });
 
       await logAudit({
         action: "excluir",
@@ -2618,6 +2660,20 @@ export default function ServicosPage() {
             </FormField>
           </FormSection>
 
+          <FormSection
+            title="Fotos"
+            description="Antes, depois e detalhes do reparo. As fotos são enviadas ao salvar o serviço."
+          >
+            <ServicePhotoField
+              key={`${formSession}-${editingService?.id || "novo"}`}
+              supabase={supabase}
+              contaId={contaId}
+              serviceId={editingService?.id || null}
+              draft={photoDraft}
+              onChange={setPhotoDraft}
+              disabled={saving}
+            />
+          </FormSection>
         </Form>
       </Modal>
 
@@ -2707,6 +2763,14 @@ export default function ServicosPage() {
                 </p>
               </div>
             </section>
+
+            <ServicePhotoGallery
+              key={`${selectedService.id}-${selectedService.updated_at || ""}`}
+              supabase={supabase}
+              contaId={contaId}
+              serviceId={selectedService.id}
+              usuarioId={usuarioId}
+            />
 
             <section className="rounded-xl border border-border bg-surface p-4 sm:p-5">
               <div className="flex items-center justify-between gap-3">
