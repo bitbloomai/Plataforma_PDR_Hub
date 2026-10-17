@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Save } from "lucide-react";
+import { RefreshCw, Save, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -11,10 +11,18 @@ import {
   FormGrid,
   FormSection,
   Input,
+  SearchableSelect,
   Select,
   Switch,
   Textarea,
 } from "@/components/shared";
+import {
+  applyPattern,
+  countryOptions,
+  findCountry,
+  localPhone,
+  phoneWithDialCode,
+} from "@/lib/countries";
 import { createClient } from "@/lib/supabase/client";
 
 const ACCOUNT_FIELDS = [
@@ -130,6 +138,8 @@ const TIMEZONE_OPTIONS = [
   { value: "Europe/Madrid", label: "Europe/Madrid - Espanha" },
   { value: "Europe/London", label: "Europe/London - Reino Unido" },
   { value: "Europe/Zurich", label: "Europe/Zurich - Suica" },
+  { value: "America/Asuncion", label: "America/Asuncion - Paraguai" },
+  { value: "Europe/Istanbul", label: "Europe/Istanbul - Turquia" },
   { value: "Australia/Sydney", label: "Australia/Sydney - Australia" },
   { value: "UTC", label: "UTC" },
 ];
@@ -151,126 +161,6 @@ const DATE_FORMAT_OPTIONS = [
     label: "MM/DD/YYYY - 08/27/2026",
   },
 ];
-
-/**
- * REGIÕES DA ITÁLIA
- */
-const ITALY_REGION_OPTIONS = [
-  { value: "Abruzzo", label: "Abruzzo" },
-  { value: "Basilicata", label: "Basilicata" },
-  { value: "Calabria", label: "Calabria" },
-  { value: "Campania", label: "Campania" },
-  {
-    value: "Emilia-Romagna",
-    label: "Emilia-Romagna",
-  },
-  {
-    value: "Friuli-Venezia Giulia",
-    label: "Friuli-Venezia Giulia",
-  },
-  { value: "Lazio", label: "Lazio" },
-  { value: "Liguria", label: "Liguria" },
-  { value: "Lombardia", label: "Lombardia" },
-  { value: "Marche", label: "Marche" },
-  { value: "Molise", label: "Molise" },
-  { value: "Piemonte", label: "Piemonte" },
-  { value: "Puglia", label: "Puglia" },
-  { value: "Sardegna", label: "Sardegna" },
-  { value: "Sicilia", label: "Sicilia" },
-  { value: "Toscana", label: "Toscana" },
-  {
-    value: "Trentino-Alto Adige",
-    label: "Trentino-Alto Adige",
-  },
-  { value: "Umbria", label: "Umbria" },
-  {
-    value: "Valle d'Aosta",
-    label: "Valle d'Aosta",
-  },
-  { value: "Veneto", label: "Veneto" },
-];
-
-/**
- * ESTADOS DO BRASIL
- */
-const BRAZIL_STATE_OPTIONS = [
-  { value: "AC", label: "AC - Acre" },
-  { value: "AL", label: "AL - Alagoas" },
-  { value: "AP", label: "AP - Amapá" },
-  { value: "AM", label: "AM - Amazonas" },
-  { value: "BA", label: "BA - Bahia" },
-  { value: "CE", label: "CE - Ceará" },
-  { value: "DF", label: "DF - Distrito Federal" },
-  { value: "ES", label: "ES - Espírito Santo" },
-  { value: "GO", label: "GO - Goiás" },
-  { value: "MA", label: "MA - Maranhão" },
-  { value: "MT", label: "MT - Mato Grosso" },
-  {
-    value: "MS",
-    label: "MS - Mato Grosso do Sul",
-  },
-  { value: "MG", label: "MG - Minas Gerais" },
-  { value: "PA", label: "PA - Pará" },
-  { value: "PB", label: "PB - Paraíba" },
-  { value: "PR", label: "PR - Paraná" },
-  { value: "PE", label: "PE - Pernambuco" },
-  { value: "PI", label: "PI - Piauí" },
-  {
-    value: "RJ",
-    label: "RJ - Rio de Janeiro",
-  },
-  {
-    value: "RN",
-    label: "RN - Rio Grande do Norte",
-  },
-  {
-    value: "RS",
-    label: "RS - Rio Grande do Sul",
-  },
-  { value: "RO", label: "RO - Rondônia" },
-  { value: "RR", label: "RR - Roraima" },
-  {
-    value: "SC",
-    label: "SC - Santa Catarina",
-  },
-  { value: "SP", label: "SP - São Paulo" },
-  { value: "SE", label: "SE - Sergipe" },
-  { value: "TO", label: "TO - Tocantins" },
-];
-
-/**
- * Retorna as opções de estado/região de acordo com o país.
- */
-function getRegionOptions(country) {
-  const normalizedCountry = String(country || "")
-    .trim()
-    .toLowerCase();
-
-  if (
-    normalizedCountry === "brasil" ||
-    normalizedCountry === "brazil"
-  ) {
-    return BRAZIL_STATE_OPTIONS;
-  }
-
-  if (
-    normalizedCountry === "italia" ||
-    normalizedCountry === "itália" ||
-    normalizedCountry === "italy"
-  ) {
-    return ITALY_REGION_OPTIONS;
-  }
-
-  /**
-   * Se o país não estiver reconhecido,
-   * disponibilizamos as duas listas para não
-   * quebrar um registro antigo.
-   */
-  return [
-    ...ITALY_REGION_OPTIONS,
-    ...BRAZIL_STATE_OPTIONS,
-  ];
-}
 
 function getLocaleDefaults(locale) {
   const option = LOCALE_OPTIONS.find((item) => item.value === locale);
@@ -308,10 +198,71 @@ export default function ConfiguracoesPage() {
   const [saving, setSaving] = useState(false);
 
   /**
+   * País selecionado: define rótulos, máscaras e a lista de regiões.
+   */
+  const country = useMemo(() => findCountry(accountForm.pais), [accountForm.pais]);
+
+  const accountCountryOptions = useMemo(() => {
+    const options = countryOptions();
+    // Registro antigo com país fora da lista continua visível no select.
+    if (accountForm.pais && !country) {
+      return [{ value: accountForm.pais, label: accountForm.pais }, ...options];
+    }
+    return options;
+  }, [accountForm.pais, country]);
+
+  /**
+   * Sugestão de preferências (idioma, moeda, fuso) conforme o país da conta.
+   */
+  const suggestedPreferences = useMemo(() => {
+    const defaults = country?.defaults || {};
+    const changes = {};
+    if (defaults.locale && LOCALE_OPTIONS.some((item) => item.value === defaults.locale) && defaults.locale !== configForm.locale) {
+      changes.locale = defaults.locale;
+    }
+    if (defaults.moeda && CURRENCY_OPTIONS.some((item) => item.value === defaults.moeda) && defaults.moeda !== configForm.moeda) {
+      changes.moeda = defaults.moeda;
+    }
+    if (defaults.timezone && TIMEZONE_OPTIONS.some((item) => item.value === defaults.timezone) && defaults.timezone !== configForm.timezone) {
+      changes.timezone = defaults.timezone;
+    }
+    return Object.keys(changes).length ? changes : null;
+  }, [configForm.locale, configForm.moeda, configForm.timezone, country]);
+
+  function changeCountry(nextCountryName) {
+    const next = findCountry(nextCountryName);
+
+    setAccountForm((current) => {
+      const local = localPhone(current.telefone, current.pais);
+      const regionStillValid = next?.regions?.some((item) => item.value === current.estado_regiao);
+
+      return {
+        ...current,
+        pais: nextCountryName,
+        telefone: next ? phoneWithDialCode(local, nextCountryName) : current.telefone,
+        estado_regiao: regionStillValid ? current.estado_regiao : "",
+        documento: next ? applyPattern(current.documento, next.documentPattern) : current.documento,
+        cep: next ? applyPattern(current.cep, next.postalPattern) : current.cep,
+      };
+    });
+  }
+
+  function applySuggestedPreferences() {
+    if (!suggestedPreferences) return;
+    setConfigForm((current) => {
+      const next = { ...current, ...suggestedPreferences };
+      if (suggestedPreferences.locale) {
+        next.formato_data = getLocaleDefaults(suggestedPreferences.locale).dateFormat || current.formato_data;
+      }
+      return next;
+    });
+  }
+
+  /**
    * Lista de regiões/estados baseada no país informado.
    */
   const regionOptions = useMemo(() => {
-    const options = getRegionOptions(accountForm.pais);
+    const options = country?.regions || [];
 
     /**
      * Se já existir um valor salvo no banco e ele não
@@ -336,7 +287,16 @@ export default function ConfiguracoesPage() {
     }
 
     return options;
-  }, [accountForm.pais, accountForm.estado_regiao]);
+  }, [accountForm.estado_regiao, country]);
+
+  const documentPlaceholder =
+    country?.documentPlaceholder ||
+    country?.documentPattern?.replace(/#/g, "0").replace(/\*/g, "X") ||
+    "";
+  const postalPlaceholder =
+    country?.postalPlaceholder ||
+    country?.postalPattern?.replace(/#/g, "0").replace(/\*/g, "X") ||
+    "";
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -622,59 +582,82 @@ export default function ConfiguracoesPage() {
               </FormField>
 
               <FormField label="Telefone">
-                <Input
-                  value={accountForm.telefone}
-                  onChange={(event) =>
-                    setAccountForm((current) => ({
-                      ...current,
-                      telefone: event.target.value,
-                    }))
-                  }
+                <div className="flex min-w-0">
+                  {country ? (
+                    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-l-lg border border-r-0 border-border bg-surface-2 px-3 text-sm text-muted-foreground">
+                      <span aria-hidden="true">{country.flag}</span>+{country.dialCode}
+                    </span>
+                  ) : null}
+                  <Input
+                    type="tel"
+                    value={country ? localPhone(accountForm.telefone, accountForm.pais) : accountForm.telefone}
+                    onChange={(event) =>
+                      setAccountForm((current) => ({
+                        ...current,
+                        telefone: country
+                          ? phoneWithDialCode(event.target.value, current.pais)
+                          : event.target.value,
+                      }))
+                    }
+                    placeholder={country?.phonePattern.replace(/#/g, "0")}
+                    className={country ? "rounded-l-none" : undefined}
+                    aria-label={country ? `Telefone (+${country.dialCode})` : "Telefone"}
+                  />
+                </div>
+              </FormField>
+
+              <FormField label="País">
+                <Select
+                  value={accountForm.pais}
+                  onChange={(event) => changeCountry(event.target.value)}
+                  options={accountCountryOptions}
+                  placeholder="Selecione o país"
                 />
               </FormField>
 
-              <FormField label="Documento">
+              <FormField label={country?.documentLabel || "Documento"}>
                 <Input
                   value={accountForm.documento}
                   onChange={(event) =>
                     setAccountForm((current) => ({
                       ...current,
-                      documento: event.target.value,
+                      documento: country
+                        ? applyPattern(event.target.value, country.documentPattern)
+                        : event.target.value,
                     }))
                   }
-                />
-              </FormField>
-
-              <FormField label="País">
-                <Input
-                  value={accountForm.pais}
-                  onChange={(event) => {
-                    const newCountry =
-                      event.target.value;
-
-                    setAccountForm((current) => ({
-                      ...current,
-                      pais: newCountry,
-                    }));
-                  }}
+                  placeholder={documentPlaceholder}
+                  maxLength={country?.documentPattern.length}
                 />
               </FormField>
             </FormGrid>
 
-            <FormGrid columns={4}>
-              <FormField
-                label="Endereço"
-                className="sm:col-span-2"
-              >
-                <Input
-                  value={accountForm.endereco}
-                  onChange={(event) =>
-                    setAccountForm((current) => ({
-                      ...current,
-                      endereco: event.target.value,
-                    }))
-                  }
-                />
+            <FormGrid columns={3}>
+              <FormField label={country?.regionLabel || "Estado / Região"}>
+                {regionOptions.length ? (
+                  <SearchableSelect
+                    value={accountForm.estado_regiao}
+                    onChange={(value) =>
+                      setAccountForm((current) => ({
+                        ...current,
+                        estado_regiao: value || "",
+                      }))
+                    }
+                    options={regionOptions}
+                    placeholder={`Selecione ${(country?.regionLabel || "a região").toLowerCase()}`}
+                    searchPlaceholder="Buscar..."
+                  />
+                ) : (
+                  <Input
+                    value={accountForm.estado_regiao}
+                    onChange={(event) =>
+                      setAccountForm((current) => ({
+                        ...current,
+                        estado_regiao: event.target.value,
+                      }))
+                    }
+                  />
+                )}
               </FormField>
 
               <FormField label="Cidade">
@@ -689,33 +672,55 @@ export default function ConfiguracoesPage() {
                 />
               </FormField>
 
-              {/* SELECT DE ESTADO / REGIÃO */}
-              <FormField label="Estado / Região">
-                <Select
-                  value={accountForm.estado_regiao}
-                  onChange={(event) =>
-                    setAccountForm((current) => ({
-                      ...current,
-                      estado_regiao:
-                        event.target.value,
-                    }))
-                  }
-                  options={regionOptions}
-                />
-              </FormField>
-
-              <FormField label="CEP">
+              <FormField label={country?.postalLabel || "Código postal"}>
                 <Input
                   value={accountForm.cep}
                   onChange={(event) =>
                     setAccountForm((current) => ({
                       ...current,
-                      cep: event.target.value,
+                      cep: country
+                        ? applyPattern(event.target.value, country.postalPattern)
+                        : event.target.value,
                     }))
                   }
+                  placeholder={postalPlaceholder}
+                  maxLength={country?.postalPattern.length}
                 />
               </FormField>
             </FormGrid>
+
+            <FormField label="Endereço">
+              <Input
+                value={accountForm.endereco}
+                onChange={(event) =>
+                  setAccountForm((current) => ({
+                    ...current,
+                    endereco: event.target.value,
+                  }))
+                }
+                placeholder="Rua, número, complemento"
+              />
+            </FormField>
+
+            {suggestedPreferences ? (
+              <div className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/10 p-3.5 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-foreground">
+                  Ajustar as preferências para {country.flag} {country.label}?{" "}
+                  <span className="text-muted-foreground">
+                    {[
+                      suggestedPreferences.locale && `Idioma ${suggestedPreferences.locale}`,
+                      suggestedPreferences.moeda && `Moeda ${suggestedPreferences.moeda}`,
+                      suggestedPreferences.timezone && `Fuso ${suggestedPreferences.timezone}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </p>
+                <Button type="button" variant="outline" size="sm" leftIcon={Wand2} onClick={applySuggestedPreferences}>
+                  Aplicar
+                </Button>
+              </div>
+            ) : null}
 
             <div className="rounded-lg border border-border bg-background p-4">
               <Switch

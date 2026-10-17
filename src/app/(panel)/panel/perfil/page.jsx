@@ -1,7 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Camera, Crop, RefreshCw, Save, Trash2, UploadCloud, UserRound } from "lucide-react";
+import {
+  Camera,
+  Crop,
+  Eye,
+  EyeOff,
+  KeyRound,
+  RefreshCw,
+  Save,
+  Trash2,
+  UploadCloud,
+  UserRound,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -71,6 +82,72 @@ function getInitials(name) {
     .toUpperCase();
 }
 
+const EMPTY_PASSWORD_FORM = { current: "", next: "", confirm: "" };
+
+function passwordScore(password) {
+  if (!password) return 0;
+  let score = 0;
+  if (password.length >= 8) score += 1;
+  if (/[A-Za-z]/.test(password) && /\d/.test(password)) score += 1;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+  if (password.length >= 12 || /[^A-Za-z0-9]/.test(password)) score += 1;
+  return score;
+}
+
+const STRENGTH_META = [
+  { label: "Digite uma nova senha", bar: "bg-surface-3", text: "text-muted-foreground" },
+  { label: "Fraca", bar: "bg-danger", text: "text-danger" },
+  { label: "Razoável", bar: "bg-warning", text: "text-warning" },
+  { label: "Boa", bar: "bg-success", text: "text-success" },
+  { label: "Forte", bar: "bg-success", text: "text-success" },
+];
+
+function PasswordInput({ value, onChange, autoComplete, visible, onToggle }) {
+  return (
+    <div className="relative">
+      <Input
+        type={visible ? "text" : "password"}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete={autoComplete}
+        maxLength={72}
+        className="pr-10"
+      />
+      <button
+        type="button"
+        onClick={onToggle}
+        className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition hover:bg-surface-2 hover:text-foreground"
+        aria-label={visible ? "Ocultar senhas" : "Mostrar senhas"}
+        title={visible ? "Ocultar senhas" : "Mostrar senhas"}
+      >
+        {visible ? <EyeOff className="size-4" strokeWidth={1.8} /> : <Eye className="size-4" strokeWidth={1.8} />}
+      </button>
+    </div>
+  );
+}
+
+function PasswordStrength({ password }) {
+  const score = passwordScore(password);
+  const meta = STRENGTH_META[score];
+
+  return (
+    <div className="w-full max-w-sm">
+      <div className="flex gap-1.5" aria-hidden="true">
+        {[1, 2, 3, 4].map((level) => (
+          <span
+            key={level}
+            className={`h-1.5 flex-1 rounded-full transition-colors ${score >= level ? meta.bar : "bg-surface-3"}`}
+          />
+        ))}
+      </div>
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        <span className={`font-medium ${meta.text}`}>{meta.label}</span>
+        {" · "}Mínimo de 8 caracteres, com letras e números.
+      </p>
+    </div>
+  );
+}
+
 export default function PerfilPage() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -88,6 +165,10 @@ export default function PerfilPage() {
   const [cropKey, setCropKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [passwordForm, setPasswordForm] = useState(EMPTY_PASSWORD_FORM);
+  const [passwordErrors, setPasswordErrors] = useState({});
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -213,6 +294,72 @@ export default function PerfilPage() {
     });
   }
 
+  function updatePasswordField(field, value) {
+    setPasswordForm((current) => ({ ...current, [field]: value }));
+    setPasswordErrors((current) => ({ ...current, [field]: undefined }));
+  }
+
+  function validatePasswordForm() {
+    const errors = {};
+    if (!passwordForm.current) errors.current = "Informe a senha atual.";
+    if (passwordForm.next.length < 8) errors.next = "Use pelo menos 8 caracteres.";
+    else if (!/[A-Za-z]/.test(passwordForm.next) || !/\d/.test(passwordForm.next)) {
+      errors.next = "Combine letras e números.";
+    } else if (passwordForm.next === passwordForm.current) {
+      errors.next = "A nova senha deve ser diferente da atual.";
+    }
+    if (passwordForm.confirm !== passwordForm.next) errors.confirm = "As senhas não conferem.";
+    setPasswordErrors(errors);
+    return Object.keys(errors).length === 0;
+  }
+
+  async function changePassword(event) {
+    event.preventDefault();
+    if (!validatePasswordForm()) return;
+
+    setChangingPassword(true);
+    try {
+      const response = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          currentPassword: passwordForm.current,
+          newPassword: passwordForm.next,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        if (/atual/i.test(payload.error || "")) {
+          setPasswordErrors({ current: payload.error });
+        }
+        throw new Error(payload.error || "Nao foi possivel alterar a senha.");
+      }
+
+      if (me?.usuario?.id) {
+        // Auditoria sem nenhum dado da senha.
+        await supabase.from("auditoria").insert({
+          conta_id: me.usuario.conta_id,
+          usuario_id: me.usuario.id,
+          entidade: "usuarios",
+          acao: "alterar_senha",
+          registro_id: me.usuario.id,
+          descricao: "Senha de acesso alterada pelo proprio usuario.",
+        });
+      }
+
+      setPasswordForm(EMPTY_PASSWORD_FORM);
+      setPasswordErrors({});
+      setShowPasswords(false);
+      toast.success("Senha alterada com sucesso.");
+    } catch (error) {
+      toast.error(error.message || "Nao foi possivel alterar a senha.");
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
   async function saveProfile(event) {
     event.preventDefault();
     if (!me?.usuario?.id) return;
@@ -293,7 +440,7 @@ export default function PerfilPage() {
         </Button>
       </div>
 
-      <Form onSubmit={saveProfile} className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="grid items-start gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
         <section className="rounded-xl border border-border bg-surface p-5">
           <div className="flex flex-col items-center text-center">
             <span className="relative grid size-36 place-items-center overflow-hidden rounded-full border border-border bg-surface-2 text-3xl font-semibold text-foreground">
@@ -348,6 +495,8 @@ export default function PerfilPage() {
           </div>
         </section>
 
+        <div className="min-w-0 space-y-5">
+        <Form onSubmit={saveProfile}>
         <section className="rounded-xl border border-border bg-surface p-4 sm:p-5">
           <div className="mb-5 flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-lg bg-primary/10 text-primary">
@@ -389,7 +538,70 @@ export default function PerfilPage() {
             </Button>
           </div>
         </section>
-      </Form>
+        </Form>
+
+        <Form onSubmit={changePassword}>
+          <section className="rounded-xl border border-border bg-surface p-4 sm:p-5">
+            <div className="mb-5 flex items-center gap-3">
+              <span className="grid size-10 place-items-center rounded-lg bg-primary/10 text-primary">
+                <KeyRound className="size-5" strokeWidth={1.8} />
+              </span>
+              <div>
+                <h3 className="text-base font-semibold text-foreground">Segurança</h3>
+                <p className="text-sm text-muted-foreground">
+                  Altere sua senha de acesso. Você continua conectado neste dispositivo.
+                </p>
+              </div>
+            </div>
+
+            {/* Ajuda gerenciadores de senha a associar a credencial correta. */}
+            <input type="email" name="username" autoComplete="username" value={form.email} readOnly hidden />
+
+            <FormGrid columns={3}>
+              <FormField label="Senha atual" required error={passwordErrors.current}>
+                <PasswordInput
+                  value={passwordForm.current}
+                  onChange={(value) => updatePasswordField("current", value)}
+                  autoComplete="current-password"
+                  visible={showPasswords}
+                  onToggle={() => setShowPasswords((current) => !current)}
+                />
+              </FormField>
+              <FormField label="Nova senha" required error={passwordErrors.next}>
+                <PasswordInput
+                  value={passwordForm.next}
+                  onChange={(value) => updatePasswordField("next", value)}
+                  autoComplete="new-password"
+                  visible={showPasswords}
+                  onToggle={() => setShowPasswords((current) => !current)}
+                />
+              </FormField>
+              <FormField label="Confirmar nova senha" required error={passwordErrors.confirm}>
+                <PasswordInput
+                  value={passwordForm.confirm}
+                  onChange={(value) => updatePasswordField("confirm", value)}
+                  autoComplete="new-password"
+                  visible={showPasswords}
+                  onToggle={() => setShowPasswords((current) => !current)}
+                />
+              </FormField>
+            </FormGrid>
+
+            <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <PasswordStrength password={passwordForm.next} />
+              <Button
+                type="submit"
+                leftIcon={KeyRound}
+                loading={changingPassword}
+                disabled={!passwordForm.current || !passwordForm.next || !passwordForm.confirm}
+              >
+                Alterar senha
+              </Button>
+            </div>
+          </section>
+        </Form>
+        </div>
+      </div>
 
       <ImageCropModal
         key={cropKey}

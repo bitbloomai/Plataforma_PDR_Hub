@@ -26,7 +26,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { localISO, todayISO } from "@/lib/dates";
-import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
+import { downloadExcelReport, openPrintReport } from "@/lib/exportReports";
 import { formatDateByConfig } from "@/lib/formatters";
 import { toast } from "@/lib/toast";
 
@@ -175,59 +175,62 @@ function buildTimeSeries(services, movements, from, to, config, convertValue = s
     .map((item) => ({ ...item, label: bucketLabel(item.key, mode, config) }));
 }
 
-function serviceExportRows(services, formatMoney, config) {
-  const header = ["Data", "Oficina", "Placa", "Veículo", "Técnicos", "Valor"];
-  const rows = services.map((service) => {
-    const techs = (service.servicos_tecnicos || [])
+function downloadExcel({ services, metrics, from, to, moneyValue, config, accountName }) {
+  const period = `${formatDateByConfig(from, config) || from} até ${formatDateByConfig(to, config) || to}`;
+  const serviceRows = services.map((service) => [
+    service.data_servico,
+    service.oficina?.nome || "",
+    service.veiculo?.placa || service.veiculo?.chassi || "",
+    [service.veiculo?.marca, service.veiculo?.modelo, service.veiculo?.cor].filter(Boolean).join(" "),
+    (service.servicos_tecnicos || [])
       .map((link) => link.tecnico?.nome)
       .filter(Boolean)
-      .join(", ");
+      .join(", "),
+    moneyValue(service.valor, service.moeda),
+  ]);
+  const servicesTotal = serviceRows.reduce((sum, row) => sum + row[5], 0);
 
-    const vehicle = [service.veiculo?.marca, service.veiculo?.modelo].filter(Boolean).join(" ");
-
-    return [
-      formatDateByConfig(service.data_servico, config) || service.data_servico,
-      service.oficina?.nome || "",
-      service.veiculo?.placa || "",
-      vehicle,
-      techs,
-      formatMoney(service.valor, service.moeda),
-    ];
-  });
-
-  return { headers: header, rows };
-}
-
-function downloadCsv({ services, metrics, from, to, formatMoney, config }) {
-  const serviceExport = serviceExportRows(services, formatMoney, config);
-  const period = `${formatDateByConfig(from, config) || from} ate ${formatDateByConfig(to, config) || to}`;
-
-  downloadCsvReport({
-    filename: `dashboard_${from}_${to}.csv`,
-    title: "PDR Hub - Dashboard",
+  return downloadExcelReport({
+    filename: `dashboard_${from}_${to}.xlsx`,
+    title: "Dashboard · Visão geral",
+    subtitle: accountName,
+    currency: config?.moeda || "EUR",
+    dateFormat: config?.formato_data,
     metadata: [
-      ["Periodo", period],
-      ["Gerado em", todayISO()],
-      ["Total de servicos", services.length],
+      ["Período", period],
+      ["Moeda", config?.moeda || "EUR"],
+      ["Serviços", services.length],
     ],
     sections: [
       {
         title: "Resumo executivo",
+        sheetName: "Resumo",
         headers: ["Indicador", "Valor"],
+        columns: [{ type: "text", width: 30 }, { type: "money", width: 22 }],
         rows: [
-          ["Receita prevista", formatMoney(metrics.receitaPrevista)],
-          ["Recebido", formatMoney(metrics.recebido)],
-          ["A receber", formatMoney(metrics.aReceber)],
-          ["Despesas previstas", formatMoney(metrics.despesas)],
-          ["Resultado previsto", formatMoney(metrics.resultado)],
-          ["Saldo realizado", formatMoney(metrics.saldoRealizado)],
-          ["Ticket medio", formatMoney(metrics.ticketMedio)],
+          { tone: "success", cells: ["Receita prevista", metrics.receitaPrevista] },
+          { tone: "success", cells: ["Recebido", metrics.recebido] },
+          ["A receber", metrics.aReceber],
+          { tone: "danger", cells: ["Despesas previstas", metrics.despesas] },
+          ["Saldo realizado", metrics.saldoRealizado],
+          ["Ticket médio", metrics.ticketMedio],
         ],
+        totals: [{ tone: "result", cells: ["Resultado previsto", metrics.resultado] }],
       },
       {
-        title: "Servicos filtrados",
-        headers: serviceExport.headers,
-        rows: serviceExport.rows,
+        title: "Serviços do período",
+        sheetName: "Serviços",
+        headers: ["Data", "Oficina", "Placa/Chassi", "Veículo", "Técnicos", "Valor"],
+        columns: [
+          { type: "date" },
+          { type: "text" },
+          { type: "text" },
+          { type: "text" },
+          { type: "text" },
+          { type: "money" },
+        ],
+        rows: serviceRows,
+        totals: [{ tone: "result", cells: ["", `${services.length} serviço(s)`, "", "", "Total", servicesTotal] }],
       },
     ],
   });
@@ -1056,20 +1059,24 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() =>
-              downloadCsv({
+              downloadExcel({
                 services,
                 metrics,
                 from,
                 to,
-                formatMoney,
+                moneyValue,
                 config: me?.configuracao,
+                accountName: me?.conta?.nome_fantasia || me?.conta?.nome || "PDR Hub",
+              }).catch((exportError) => {
+                console.error("Exportar dashboard", exportError);
+                toast.error("Não foi possível exportar", "Tente novamente.");
               })
             }
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-medium text-foreground transition hover:bg-surface-2 disabled:opacity-50"
             disabled={!services.length}
           >
             <Download className="size-4" strokeWidth={1.8} />
-            Exportar CSV
+            Exportar Excel
           </button>
 
           <button

@@ -42,7 +42,7 @@ import {
 } from "@/components/shared";
 import { createClient } from "@/lib/supabase/client";
 import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
-import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
+import { downloadExcelReport, openPrintReport } from "@/lib/exportReports";
 import { formatDateByConfig } from "@/lib/formatters";
 import { toast } from "@/lib/toast";
 
@@ -1346,78 +1346,99 @@ export default function DrePage() {
     }
   }
 
-  function exportCsv() {
+  function exportExcel() {
     if (!movements.length) {
       toast.info("Nada para exportar", "O período selecionado não possui movimentações.");
       return;
     }
 
-    const summaryRows = [
-      ["DRE", "Valor atual", comparePrevious ? "Período anterior" : ""],
-      ["Receita operacional", snapshot.operatingRevenue, previousSnapshot.operatingRevenue],
-      ["(-) Custos diretos", snapshot.directCosts, previousSnapshot.directCosts],
-      ["Resultado bruto", snapshot.grossResult, previousSnapshot.grossResult],
-      ["(-) Despesas operacionais", snapshot.operatingExpenses, previousSnapshot.operatingExpenses],
-      ["Resultado operacional", snapshot.operatingResult, previousSnapshot.operatingResult],
-      ["(+) Outras receitas", snapshot.otherRevenue, previousSnapshot.otherRevenue],
-      ["(-) Outras despesas", snapshot.otherExpenses, previousSnapshot.otherExpenses],
-      ["(+) Receitas sem classificação", snapshot.unclassifiedRevenue, previousSnapshot.unclassifiedRevenue],
-      ["(-) Despesas sem classificação", snapshot.unclassifiedExpense, previousSnapshot.unclassifiedExpense],
-      ["RESULTADO LÍQUIDO", snapshot.netResult, previousSnapshot.netResult],
-      ["Margem líquida", `${snapshot.margin.toFixed(2).replace(".", ",")}%`, `${previousSnapshot.margin.toFixed(2).replace(".", ",")}%`],
+    const statement = [
+      ["Receita operacional", "operatingRevenue", "success"],
+      ["(-) Custos diretos", "directCosts", "danger"],
+      ["Resultado bruto", "grossResult", "result"],
+      ["(-) Despesas operacionais", "operatingExpenses", "danger"],
+      ["Resultado operacional", "operatingResult", "result"],
+      ["(+) Outras receitas", "otherRevenue", "success"],
+      ["(-) Outras despesas", "otherExpenses", "danger"],
+      ["(+) Receitas sem classificação", "unclassifiedRevenue", "success"],
+      ["(-) Despesas sem classificação", "unclassifiedExpense", "danger"],
     ];
 
-    const detailHeader = [
-      "Categoria",
-      "Grupo DRE",
-      "Tipo",
-      "Lançamentos",
-      "Valor atual",
-      "Valor anterior",
-      "Participação",
-    ];
+    const summaryRows = statement.map(([label, key, tone]) => ({
+      tone,
+      cells: [label, safeNumber(snapshot[key]), ...(comparePrevious ? [safeNumber(previousSnapshot[key])] : [])],
+    }));
 
-    const detailRows = categoryComparisonRows.map((row) => [
-      row.categoryName,
-      row.groupLabel,
-      row.type === "receita" ? "Receita" : "Despesa",
-      row.count,
-      safeNumber(row.currentAmount).toFixed(2).replace(".", ","),
-      safeNumber(row.previousAmount).toFixed(2).replace(".", ","),
-      `${safeNumber(row.participation).toFixed(2).replace(".", ",")}%`,
-    ]);
+    const detailRows = categoryComparisonRows.map((row) => ({
+      tone: row.type === "receita" ? "success" : "danger",
+      cells: [
+        row.categoryName,
+        row.groupLabel,
+        row.type === "receita" ? "Receita" : "Despesa",
+        row.count,
+        safeNumber(row.currentAmount),
+        safeNumber(row.previousAmount),
+        safeNumber(row.participation),
+      ],
+    }));
 
-    const metadata = [
-      ["Período", periodLabel],
-      ["Regime", "Competência"],
-      ["Moeda", currency],
-      comparePrevious ? ["Comparação", previousPeriodLabel] : ["Comparação", "Desativada"],
-      [],
-    ];
-
-    downloadCsvReport({
-      filename: `dre_${from}_${to}.csv`,
-      title: "PDR Hub - DRE",
-      metadata: metadata.filter((row) => row.length),
+    downloadExcelReport({
+      filename: `dre_${from}_${to}.xlsx`,
+      title: "Demonstração do Resultado (DRE)",
+      subtitle: me?.conta?.nome_fantasia || me?.conta?.nome || "PDR Hub",
+      currency,
+      dateFormat: me?.configuracao?.formato_data,
+      metadata: [
+        ["Período", periodLabel],
+        ["Regime", "Competência"],
+        ["Moeda", currency],
+        ["Comparação", comparePrevious ? previousPeriodLabel : "Desativada"],
+      ],
       sections: [
         {
           title: "Resumo DRE",
-          headers: summaryRows[0],
-          rows: summaryRows.slice(1).map(([label, current, previous]) => [
-            label,
-            typeof current === "number" ? formatMoney(current) : current,
-            typeof previous === "number" ? formatMoney(previous) : previous,
-          ]),
+          sheetName: "DRE",
+          headers: ["Linha da DRE", "Valor atual", ...(comparePrevious ? ["Período anterior"] : [])],
+          columns: [{ type: "text", width: 38 }, { type: "money" }, { type: "money" }],
+          rows: summaryRows,
+          totals: [
+            {
+              tone: "result",
+              cells: [
+                "RESULTADO LÍQUIDO",
+                safeNumber(snapshot.netResult),
+                ...(comparePrevious ? [safeNumber(previousSnapshot.netResult)] : []),
+              ],
+            },
+            [
+              "Margem líquida",
+              { value: safeNumber(snapshot.margin), type: "percent" },
+              ...(comparePrevious ? [{ value: safeNumber(previousSnapshot.margin), type: "percent" }] : []),
+            ],
+          ],
         },
         {
           title: "Detalhamento por categoria",
-          headers: detailHeader,
+          sheetName: "Categorias",
+          headers: ["Categoria", "Grupo DRE", "Tipo", "Lançamentos", "Valor atual", "Valor anterior", "Participação"],
+          columns: [
+            { type: "text" },
+            { type: "text" },
+            { type: "text" },
+            { type: "integer" },
+            { type: "money" },
+            { type: "money" },
+            { type: "percent" },
+          ],
           rows: detailRows,
         },
       ],
-    });
-
-    toast.success("DRE exportado", "O arquivo CSV foi gerado com o resumo e o detalhamento.");
+    })
+      .then(() => toast.success("DRE exportado", "A planilha Excel foi gerada com o resumo e o detalhamento."))
+      .catch((exportError) => {
+        console.error("Exportar DRE", exportError);
+        toast.error("Não foi possível exportar", "Tente novamente.");
+      });
   }
 
   function printDre() {
@@ -1707,10 +1728,10 @@ export default function DrePage() {
           <Button
             variant="outline"
             leftIcon={Download}
-            onClick={exportCsv}
+            onClick={exportExcel}
             disabled={!movements.length}
           >
-            Exportar CSV
+            Exportar Excel
           </Button>
           <Button
             variant="outline"

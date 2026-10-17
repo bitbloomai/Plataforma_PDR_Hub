@@ -2415,7 +2415,7 @@ export default function ServicosPage() {
               </FormField>
             ) : (
               <FormGrid>
-                <FormField label="Placa" required error={formErrors.vehicle_plate}>
+                <FormField label="Placa/Chassi" required error={formErrors.vehicle_plate}>
                   <Input
                     value={form.newVehicle.placa}
                     onChange={(event) =>

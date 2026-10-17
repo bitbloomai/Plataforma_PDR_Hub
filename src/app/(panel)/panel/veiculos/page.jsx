@@ -585,7 +585,7 @@ export default function VeiculosPage() {
     () => [
       {
         key: "placa",
-        header: "Placa",
+        header: "Placa/Chassi",
         sortable: true,
         render: (_, row) => (
           <Button
@@ -975,7 +975,7 @@ export default function VeiculosPage() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <InfoItem icon={Hash} label="Placa" value={selectedRow.placa} />
+                <InfoItem icon={Hash} label="Placa/Chassi" value={selectedRow.placa} />
                 <InfoItem icon={Car} label="Marca" value={selectedRow.vehicle.marca} />
                 <InfoItem icon={Car} label="Modelo" value={selectedRow.vehicle.modelo} />
                 <InfoItem icon={CalendarDays} label="Ano" value={selectedRow.vehicle.ano} />

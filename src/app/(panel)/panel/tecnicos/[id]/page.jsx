@@ -66,7 +66,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { localISO, todayISO } from "@/lib/dates";
-import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
+import { downloadExcelReport, openPrintReport } from "@/lib/exportReports";
 import {
   formatDateByConfig,
   formatDateTimeByConfig,
@@ -964,61 +964,124 @@ export default function TecnicoDetalhePage() {
     "Repasse",
   ];
 
-  function exportCsv() {
+  function exportExcel() {
     if (!technician) return;
 
-    downloadCsvReport({
-      filename: `fechamento_${normalizeText(technician.nome).replace(/\s+/g, "-")}_${dateFrom || "inicio"}_${dateTo || todayISO(timezone)}.csv`,
-      title: `PDR Hub - Fechamento do técnico ${technician.nome}`,
+    const payment = paymentDetails(technician);
+    const serviceRows = filteredRows.map((row) => ({
+      tone: row.cancelled ? "danger" : undefined,
+      cells: [
+        row.date,
+        row.identifier || "—",
+        [vehicleName(row.vehicle), row.vehicle?.ano, row.vehicle?.cor].filter(Boolean).join(" · "),
+        row.office?.nome || "—",
+        SERVICE_STATUS_META[row.status]?.label || row.status || "—",
+        row.serviceValue,
+        row.percent,
+        row.cancelled ? 0 : row.technicianValue,
+        row.cancelled
+          ? "Sem repasse"
+          : row.paid
+            ? "Pago"
+            : row.movement
+              ? "A repassar"
+              : "Sem lançamento",
+        row.paid ? row.movement?.data_pagamento || "" : "",
+      ],
+    }));
+
+    downloadExcelReport({
+      filename: `fechamento_${normalizeText(technician.nome).replace(/\s+/g, "-")}_${dateFrom || "inicio"}_${dateTo || todayISO(timezone)}.xlsx`,
+      title: `Fechamento · ${technician.nome}`,
+      subtitle: me?.conta?.nome_fantasia || me?.conta?.nome || "PDR Hub",
+      currency: config?.moeda || "EUR",
+      dateFormat: config?.formato_data,
       metadata: [
-        ["Técnico", technician.nome],
         ["Período", periodLabel],
         ["Oficina", officeFilterLabel],
         ["Moeda", config?.moeda || "EUR"],
-        ["Gerado em", formatDateTimeByConfig(new Date().toISOString(), config)],
       ],
       sections: [
         {
           title: "Resumo do fechamento",
+          sheetName: "Resumo",
           headers: ["Indicador", "Valor"],
+          columns: [{ type: "text", width: 30 }, { type: "money", width: 24 }],
           rows: [
-            ["Serviços", totals.count],
-            ["Valor dos serviços", formatMoney(totals.serviceValue)],
-            ["Total do técnico", formatMoney(totals.technicianValue)],
-            ["Já pago", formatMoney(totals.paid)],
-            ["A repassar", formatMoney(totals.pending)],
+            ["Serviços", { value: totals.count, type: "integer" }],
+            ["Valor dos serviços", totals.serviceValue],
+            ["Comissão média", { value: totals.averagePercent, type: "percent" }],
+            ["Total do técnico", totals.technicianValue],
+            { tone: "success", cells: ["Já pago", totals.paid] },
+            ...payment.map(([label, value]) => [`Pagamento · ${label}`, { value, type: "text" }]),
           ],
+          totals: [{ tone: "result", cells: ["A repassar", totals.pending] }],
         },
         {
-          title: "Serviços",
-          headers: reportHeaders,
-          rows: [
-            ...reportRows(),
-            [
-              "TOTAL",
-              "",
-              "",
-              "",
-              `${totals.count} serviço(s)`,
-              formatMoney(totals.serviceValue),
-              "",
-              formatMoney(totals.technicianValue),
-              `A repassar: ${formatMoney(totals.pending)}`,
-            ],
+          title: `Serviços · ${periodLabel}`,
+          sheetName: "Serviços",
+          headers: [
+            "Data",
+            "Placa/Chassi",
+            "Veículo",
+            "Oficina",
+            "Status",
+            "Valor do serviço",
+            "Comissão",
+            "Valor do técnico",
+            "Repasse",
+            "Pago em",
+          ],
+          columns: [
+            { type: "date" },
+            { type: "text" },
+            { type: "text", width: 34 },
+            { type: "text" },
+            { type: "text" },
+            { type: "money" },
+            { type: "percent" },
+            { type: "money" },
+            { type: "text" },
+            { type: "date" },
+          ],
+          rows: serviceRows,
+          totals: [
+            {
+              tone: "result",
+              cells: [
+                "",
+                "",
+                `${totals.count} serviço(s)`,
+                "",
+                "Total",
+                totals.serviceValue,
+                { value: totals.averagePercent, type: "percent" },
+                totals.technicianValue,
+                "",
+                "",
+              ],
+            },
+            ["", "", "", "", "Já pago", "", "", totals.paid, "", ""],
+            { tone: "result", cells: ["", "", "", "", "A repassar", "", "", totals.pending, "", ""] },
           ],
         },
         {
           title: "Resumo por oficina",
+          sheetName: "Por oficina",
           headers: ["Oficina", "Serviços", "Valor dos serviços", "Total do técnico", "A repassar"],
+          columns: [{ type: "text" }, { type: "integer" }, { type: "money" }, { type: "money" }, { type: "money" }],
           rows: officeBreakdown.map((entry) => [
             entry.name,
             entry.count,
-            formatMoney(entry.serviceValue),
-            formatMoney(entry.technicianValue),
-            formatMoney(entry.pending),
+            entry.serviceValue,
+            entry.technicianValue,
+            entry.pending,
           ]),
         },
       ],
+    }).catch((exportError) => {
+      console.error("Exportar fechamento", exportError);
+      toast.error("Não foi possível exportar", "Tente novamente.");
     });
   }
 
@@ -1400,8 +1463,8 @@ export default function TecnicoDetalhePage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" leftIcon={Download} onClick={exportCsv} disabled={!filteredRows.length}>
-              CSV
+            <Button variant="secondary" leftIcon={Download} onClick={exportExcel} disabled={!filteredRows.length}>
+              Excel
             </Button>
             <Button variant="secondary" leftIcon={Printer} onClick={printReport} disabled={!filteredRows.length}>
               PDF

@@ -47,7 +47,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { formatDisplayMoney, moneyFromStorage, withSourceCurrency } from "@/lib/currency";
 import { localISO, todayISO } from "@/lib/dates";
-import { downloadCsvReport, openPrintReport } from "@/lib/exportReports";
+import { downloadExcelReport, openPrintReport } from "@/lib/exportReports";
 import { formatDateByConfig } from "@/lib/formatters";
 import { toast } from "@/lib/toast";
 
@@ -1572,72 +1572,106 @@ export default function FinanceiroPage() {
   }
 
   function movementExportRows(rows) {
-    return rows.map((movement) => [
-      formatDate(movement.data_competencia),
-      movement.descricao || "",
-      categoryMeta(movement).name,
-      movement.oficina?.nome || "",
-      movement.tecnico?.nome || "",
-      movement.tipo === "receita" ? "Receita" : "Despesa",
-      formatMoney(movement.valor, movement.moeda),
-      isPaid(movement.status) ? (isRevenue(movement) ? "Recebido" : "Pago") : "Pendente",
-      movement.data_vencimento ? formatDate(movement.data_vencimento) : "",
-      movement.data_pagamento ? formatDate(movement.data_pagamento) : "",
-      movement.forma_pagamento || "",
-    ]);
+    return rows.map((movement) => ({
+      tone: isRevenue(movement) ? "success" : "danger",
+      cells: [
+        movement.data_competencia,
+        movement.descricao || "",
+        categoryMeta(movement).name,
+        movement.oficina?.nome || "",
+        movement.tecnico?.nome || "",
+        movement.tipo === "receita" ? "Receita" : "Despesa",
+        // Despesas negativas: a coluna soma direto o saldo no Excel.
+        (isExpense(movement) ? -1 : 1) * moneyValue(movement.valor, movement.moeda),
+        isPaid(movement.status) ? (isRevenue(movement) ? "Recebido" : "Pago") : "Pendente",
+        movement.data_vencimento || "",
+        movement.data_pagamento || "",
+        movement.forma_pagamento || "",
+      ],
+    }));
   }
 
-  function exportCsv() {
+  function exportExcel() {
     if (!filteredMovements.length) {
       toast.info("Nada para exportar", "Os filtros atuais não possuem movimentações.");
       return;
     }
 
-    const header = [
-      "Data",
-      "Descrição",
-      "Categoria",
-      "Oficina",
-      "Técnico",
-      "Tipo",
-      "Valor",
-      "Status",
-      "Vencimento",
-      "Pagamento",
-      "Forma de pagamento",
-    ];
+    const revenueTotal = sumBy(filteredMovements.filter(isRevenue), (row) => moneyValue(row.valor, row.moeda));
+    const expenseTotal = sumBy(filteredMovements.filter(isExpense), (row) => moneyValue(row.valor, row.moeda));
+    const tabLabel =
+      activeTab === "revenue" ? "Receitas" : activeTab === "expense" ? "Despesas" : "Fluxo de caixa";
 
-    downloadCsvReport({
-      filename: `financeiro_${from}_${to}.csv`,
-      title: "PDR Hub - Financeiro",
+    downloadExcelReport({
+      filename: `financeiro_${from}_${to}.xlsx`,
+      title: "Relatório financeiro",
+      subtitle: me?.conta?.nome_fantasia || me?.conta?.nome || "PDR Hub",
+      currency,
+      dateFormat: me?.configuracao?.formato_data,
       metadata: [
-        ["Periodo", `${formatDate(from)} ate ${formatDate(to)}`],
+        ["Período", `${formatDate(from)} até ${formatDate(to)}`],
+        ["Aba", tabLabel],
         ["Moeda", currency],
-        ["Lancamentos", filteredMovements.length],
-        ["Gerado em", todayISO()],
+        ["Lançamentos", filteredMovements.length],
       ],
       sections: [
         {
           title: "Resumo financeiro",
+          sheetName: "Resumo",
           headers: ["Indicador", "Valor"],
+          columns: [{ type: "text", width: 30 }, { type: "money", width: 22 }],
           rows: [
-            ["Receitas", formatMoney(metrics.totalRevenue)],
-            ["Despesas", formatMoney(metrics.totalExpense)],
-            ["Saldo do periodo", formatMoney(metrics.periodBalance)],
-            ["Entradas realizadas", formatMoney(metrics.received)],
-            ["Saidas realizadas", formatMoney(metrics.paid)],
-            ["Saldo realizado", formatMoney(metrics.realizedBalance)],
+            { tone: "success", cells: ["Receitas", metrics.totalRevenue] },
+            { tone: "danger", cells: ["Despesas", metrics.totalExpense] },
+            ["Entradas realizadas", metrics.received],
+            ["Saídas realizadas", metrics.paid],
+            ["Saldo realizado", metrics.realizedBalance],
           ],
+          totals: [{ tone: "result", cells: ["Saldo do período", metrics.periodBalance] }],
         },
         {
-          title: "Movimentacoes filtradas",
-          headers: header,
+          title: `Movimentações · ${tabLabel}`,
+          sheetName: "Movimentações",
+          headers: [
+            "Data",
+            "Descrição",
+            "Categoria",
+            "Oficina",
+            "Técnico",
+            "Tipo",
+            "Valor",
+            "Status",
+            "Vencimento",
+            "Pagamento",
+            "Forma de pagamento",
+          ],
+          columns: [
+            { type: "date" },
+            { type: "text", width: 42 },
+            { type: "text" },
+            { type: "text" },
+            { type: "text" },
+            { type: "text" },
+            { type: "money" },
+            { type: "text" },
+            { type: "date" },
+            { type: "date" },
+            { type: "text" },
+          ],
           rows: movementExportRows(filteredMovements),
+          totals: [
+            ...(revenueTotal ? [{ tone: "success", cells: ["", "Total de receitas", "", "", "", "", revenueTotal] }] : []),
+            ...(expenseTotal ? [{ tone: "danger", cells: ["", "Total de despesas", "", "", "", "", -expenseTotal] }] : []),
+            { tone: "result", cells: ["", "Saldo", "", "", "", "", revenueTotal - expenseTotal] },
+          ],
         },
       ],
-    });
-
-    toast.success("CSV gerado", "As movimentações filtradas foram exportadas.");
+    })
+      .then(() => toast.success("Planilha gerada", "As movimentações filtradas foram exportadas para Excel."))
+      .catch((exportError) => {
+        console.error("Exportar financeiro", exportError);
+        toast.error("Não foi possível exportar", "Tente novamente.");
+      });
   }
 
   function printFinancialReport() {
@@ -1949,10 +1983,10 @@ export default function FinanceiroPage() {
           <Button
             variant="outline"
             leftIcon={Download}
-            onClick={exportCsv}
+            onClick={exportExcel}
             disabled={!filteredMovements.length || activeTab === "categories"}
           >
-            Exportar CSV
+            Exportar Excel
           </Button>
           <Button
             variant="outline"
