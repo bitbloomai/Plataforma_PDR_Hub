@@ -67,7 +67,7 @@ async function transcribe(base64Audio) {
     body: JSON.stringify({
       model,
       temperature: 0,
-      max_tokens: 1500,
+      max_tokens: 16000,
       messages: [
         { role: "system", content: systemPrompt() },
         {

@@ -18,11 +18,40 @@ import { Button, Portal } from "@/components/shared";
 import {
   ACCEPTED_PHOTO_TYPES,
   MAX_SERVICE_PHOTOS,
+  compressServicePhotos,
+  compressionSummary,
   deleteServicePhotos,
   listServicePhotos,
   uploadServicePhotos,
 } from "@/lib/service-photos";
 import { toast } from "@/lib/toast";
+
+function isImageFile(file) {
+  return /^image\//i.test(file?.type || "") || /\.hei[cf]$/i.test(file?.name || "");
+}
+
+function CompressionProgress({ done, total }) {
+  const current = Math.min(done + 1, total);
+  const percent = total ? Math.round((done / total) * 100) : 0;
+
+  return (
+    <div className="rounded-xl border border-border bg-surface-2/40 p-4" role="status" aria-live="polite">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="flex items-center gap-2 font-medium text-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Otimizando foto {current} de {total}
+        </span>
+        <span className="text-xs text-muted-foreground">{percent}%</span>
+      </div>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-3">
+        <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${percent}%` }} />
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Reduzindo o tamanho sem perder os detalhes do reparo.
+      </p>
+    </div>
+  );
+}
 
 function photoKey(photo) {
   return photo.key || photo.id;
@@ -332,10 +361,19 @@ function DropZone({ onFiles, disabled, compact = false, children }) {
    As fotos ficam em rascunho e sobem depois que o serviço é salvo.
    ========================================================= */
 
-export function ServicePhotoField({ supabase, contaId, serviceId, draft, onChange, disabled = false }) {
+export function ServicePhotoField({
+  supabase,
+  contaId,
+  serviceId,
+  draft,
+  onChange,
+  onBusyChange,
+  disabled = false,
+}) {
   const [existing, setExisting] = useState([]);
   const [loading, setLoading] = useState(Boolean(serviceId));
   const [viewerIndex, setViewerIndex] = useState(null);
+  const [progress, setProgress] = useState(null);
 
   useEffect(() => {
     let ignore = false;
@@ -362,11 +400,12 @@ export function ServicePhotoField({ supabase, contaId, serviceId, draft, onChang
   const visibleExisting = existing.filter((photo) => !removedIds.has(photo.id));
   const allPhotos = [...visibleExisting, ...draft.added];
 
-  function addFiles(files) {
-    const images = files.filter((file) => /^image\//i.test(file.type) || /\.hei[cf]$/i.test(file.name));
+  async function addFiles(files) {
+    const images = files.filter(isImageFile);
     if (images.length < files.length) {
       toast.warning("Arquivo ignorado", "Somente imagens podem ser anexadas ao serviço.");
     }
+    if (!images.length) return;
 
     const room = MAX_SERVICE_PHOTOS - allPhotos.length;
     if (room <= 0) {
@@ -379,25 +418,44 @@ export function ServicePhotoField({ supabase, contaId, serviceId, draft, onChang
       toast.warning("Limite de fotos", `Foram adicionadas ${accepted.length}. Cada serviço aceita até ${MAX_SERVICE_PHOTOS} fotos.`);
     }
 
-    onChange({
-      ...draft,
-      added: [
-        ...draft.added,
-        ...accepted.map((file) => ({
-          key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          file,
-          previewUrl: URL.createObjectURL(file),
-        })),
-      ],
-    });
+    // Comprime já na seleção: a prévia fica leve e o envio, rápido.
+    setProgress({ done: 0, total: accepted.length });
+    onBusyChange?.(true);
+
+    const result = await compressServicePhotos(accepted, (done, total) => setProgress({ done, total }));
+
+    setProgress(null);
+    onBusyChange?.(false);
+
+    if (result.files.length) {
+      onChange((current) => ({
+        ...current,
+        added: [
+          ...current.added,
+          ...result.files.map((file) => ({
+            key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            file,
+            previewUrl: URL.createObjectURL(file),
+          })),
+        ],
+      }));
+      toast.success("Fotos prontas", compressionSummary(result));
+    }
+
+    if (result.errors.length) {
+      toast.error("Algumas fotos não foram adicionadas", result.errors.slice(0, 2).join(" "));
+    }
   }
 
   function removePhoto(photo) {
     if (photo.previewUrl) {
       URL.revokeObjectURL(photo.previewUrl);
-      onChange({ ...draft, added: draft.added.filter((item) => item.key !== photo.key) });
+      onChange((current) => ({ ...current, added: current.added.filter((item) => item.key !== photo.key) }));
     } else {
-      onChange({ ...draft, removed: [...draft.removed, { id: photo.id, storage_path: photo.storage_path }] });
+      onChange((current) => ({
+        ...current,
+        removed: [...current.removed, { id: photo.id, storage_path: photo.storage_path }],
+      }));
     }
   }
 
@@ -424,7 +482,11 @@ export function ServicePhotoField({ supabase, contaId, serviceId, draft, onChang
         </div>
       ) : null}
 
-      <DropZone onFiles={addFiles} disabled={disabled} compact={allPhotos.length > 0} />
+      {progress ? (
+        <CompressionProgress done={progress.done} total={progress.total} />
+      ) : (
+        <DropZone onFiles={addFiles} disabled={disabled} compact={allPhotos.length > 0} />
+      )}
 
       {draft.removed.length ? (
         <p className="text-xs text-muted-foreground">
@@ -432,7 +494,7 @@ export function ServicePhotoField({ supabase, contaId, serviceId, draft, onChang
           <button
             type="button"
             className="font-medium text-foreground underline-offset-2 hover:underline"
-            onClick={() => onChange({ ...draft, removed: [] })}
+            onClick={() => onChange((current) => ({ ...current, removed: [] }))}
           >
             Desfazer
           </button>
@@ -459,7 +521,7 @@ export function ServicePhotoField({ supabase, contaId, serviceId, draft, onChang
 export function ServicePhotoGallery({ supabase, contaId, serviceId, usuarioId }) {
   const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(0);
+  const [busyLabel, setBusyLabel] = useState("");
   const [removingId, setRemovingId] = useState("");
   const [confirmId, setConfirmId] = useState("");
   const [viewerIndex, setViewerIndex] = useState(null);
@@ -483,7 +545,7 @@ export function ServicePhotoGallery({ supabase, contaId, serviceId, usuarioId })
   }, [contaId, reload, serviceId]);
 
   async function handleFiles(files) {
-    const images = files.filter((file) => /^image\//i.test(file.type) || /\.hei[cf]$/i.test(file.name));
+    const images = files.filter(isImageFile);
     if (!images.length) {
       if (files.length) toast.warning("Arquivo ignorado", "Somente imagens podem ser anexadas ao serviço.");
       return;
@@ -496,27 +558,39 @@ export function ServicePhotoGallery({ supabase, contaId, serviceId, usuarioId })
     }
 
     const accepted = images.slice(0, room);
-    setUploading(accepted.length);
+    setBusyLabel(`Otimizando 0/${accepted.length}`);
 
-    const result = await uploadServicePhotos(supabase, {
-      contaId,
-      serviceId,
-      usuarioId,
-      files: accepted,
-    });
+    const compressed = await compressServicePhotos(accepted, (done, total) =>
+      setBusyLabel(`Otimizando ${Math.min(done + 1, total)}/${total}`)
+    );
 
-    setUploading(0);
+    let uploaded = 0;
+    const errors = [...compressed.errors];
+
+    if (compressed.files.length) {
+      setBusyLabel(`Enviando ${compressed.files.length}...`);
+      const result = await uploadServicePhotos(supabase, {
+        contaId,
+        serviceId,
+        usuarioId,
+        files: compressed.files,
+      });
+      uploaded = result.uploaded;
+      errors.push(...result.errors);
+    }
+
+    setBusyLabel("");
     await reload();
 
-    if (result.uploaded) {
+    if (uploaded) {
       toast.success(
-        result.uploaded === 1 ? "Foto adicionada" : `${result.uploaded} fotos adicionadas`,
-        "As imagens já estão no serviço."
+        uploaded === 1 ? "Foto adicionada" : `${uploaded} fotos adicionadas`,
+        compressionSummary(compressed)
       );
     }
 
-    if (result.errors.length) {
-      toast.error("Algumas fotos não foram enviadas", result.errors.slice(0, 2).join(" "));
+    if (errors.length) {
+      toast.error("Algumas fotos não foram enviadas", errors.slice(0, 2).join(" "));
     }
   }
 
@@ -536,7 +610,7 @@ export function ServicePhotoGallery({ supabase, contaId, serviceId, usuarioId })
 
   return (
     <section className="rounded-xl border border-border bg-surface p-4 sm:p-5">
-      <DropZone onFiles={handleFiles} disabled={Boolean(uploading)}>
+      <DropZone onFiles={handleFiles} disabled={Boolean(busyLabel)}>
         {(openPicker, dragging) => (
           <div className={`rounded-lg transition ${dragging ? "bg-primary/5 ring-2 ring-primary/40" : ""}`}>
             <div className="flex items-center justify-between gap-3">
@@ -557,8 +631,8 @@ export function ServicePhotoGallery({ supabase, contaId, serviceId, usuarioId })
                 size="sm"
                 variant="outline"
                 leftIcon={ImagePlus}
-                loading={Boolean(uploading)}
-                loadingText={`Enviando ${uploading}...`}
+                loading={Boolean(busyLabel)}
+                loadingText={busyLabel}
                 onClick={openPicker}
               >
                 Adicionar

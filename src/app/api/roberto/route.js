@@ -207,7 +207,7 @@ async function callOpenRouter(messages, { disableTools = false, tools = ROBERTO_
     model,
     messages,
     temperature: 0.2,
-    max_tokens: 1400,
+    max_tokens: 16000,
     parallel_tool_calls: false,
   };
   if (!disableTools) {

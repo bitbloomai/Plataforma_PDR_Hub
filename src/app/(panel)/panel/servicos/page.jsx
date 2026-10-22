@@ -834,6 +834,7 @@ export default function ServicosPage() {
   const [saving, setSaving] = useState(false);
   const [photoDraft, setPhotoDraft] = useState(createPhotoDraft);
   const [formSession, setFormSession] = useState(0);
+  const [photosBusy, setPhotosBusy] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -1585,6 +1586,7 @@ export default function ServicosPage() {
 
   async function handleSave(event) {
     event.preventDefault();
+    if (photosBusy) return;
     if (!validateForm()) return;
 
     const currentMe = meRef.current || me;
@@ -2336,7 +2338,8 @@ export default function ServicosPage() {
             <Button
               type="submit"
               form="service-form"
-              loading={saving}
+              loading={saving || photosBusy}
+              loadingText={photosBusy ? "Otimizando fotos..." : undefined}
               leftIcon={editingService ? Pencil : Plus}
             >
               {editingService ? "Salvar alterações" : "Criar serviço"}
@@ -2671,6 +2674,7 @@ export default function ServicosPage() {
               serviceId={editingService?.id || null}
               draft={photoDraft}
               onChange={setPhotoDraft}
+              onBusyChange={setPhotosBusy}
               disabled={saving}
             />
           </FormSection>
